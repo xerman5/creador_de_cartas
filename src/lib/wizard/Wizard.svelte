@@ -1,26 +1,43 @@
 <script lang="ts">
   import { DirectorySource, MemorySource, type FileSource } from '../../core/assets';
-  import { saveZip, slug } from '../../core/export';
+  import { downloadBlob, saveZip, slug } from '../../core/export';
   import { PROJECT_FILE, type LoadedProject } from '../../core/project';
   import type { RenderOptions } from '../../core/render';
   import { normalizeKey } from '../../core/text';
   import {
     attrKey,
     defaultAnswers,
+    fileKey,
     DESIGNS,
     ELEMENTS,
     FONT_PAIRS,
     PALETTES,
     resolvedType,
+    textKey,
+    typeKey,
     type DesignId,
     type ElementKey,
+    type PieceColor,
     type TypeAnswer,
     type WizardAnswers,
   } from '../../core/wizard/answers';
-  import { buildProject, MAX_ROWS_PER_TYPE, projectFiles } from '../../core/wizard/build';
+  import { buildProject, cardIds, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles } from '../../core/wizard/build';
+  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
-  import { backRow, clearDraft, loadDraft, previewLabel, previewProject, rowOfType, saveDraft } from './preview';
+  import {
+    backRow,
+    clearDraft,
+    imageFiles,
+    loadDraft,
+    parseProgress,
+    previewLabel,
+    previewProject,
+    progressJson,
+    rowOfType,
+    saveDraft,
+  } from './preview';
 
   let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
 
@@ -31,9 +48,15 @@
     { id: 'atributos', title: 'Atributos y rareza' },
     { id: 'diseno', title: 'Diseño' },
     { id: 'ajustes', title: 'Ajustes' },
+    { id: 'fino', title: 'Ajuste fino (opcional)' },
     { id: 'traseras', title: 'Traseras' },
+    { id: 'cartas', title: 'Cartas' },
+    { id: 'imagenes', title: 'Imágenes' },
     { id: 'crear', title: 'Crear' },
   ] as const;
+  type StepId = (typeof STEPS)[number]['id'];
+  const stepIndex = (s: string | number) =>
+    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === s));
   const LANGS: [string, string][] = [
     ['es', 'Español'],
     ['en', 'Inglés'],
@@ -45,9 +68,12 @@
 
   const draft = loadDraft();
   let answers = $state<WizardAnswers>(draft?.answers ?? defaultAnswers());
-  let step = $state(Math.min(draft?.step ?? 0, STEPS.length - 1));
-  let reached = $state(draft?.step ?? 0);
+  let step = $state(stepIndex(draft?.step ?? 0));
+  let reached = $state(stepIndex(draft?.step ?? 0));
   let current = $state(0);
+  /** Carta seleccionada en la tabla (índice dentro del tipo actual). */
+  let row = $state(0);
+  const stepId = $derived<StepId>(STEPS[step].id);
   let busy = $state('');
   let error = $state('');
 
@@ -68,13 +94,19 @@
     setTimeout(() => old?.assets.dispose(), 4000);
   }
 
+  // Con la tabla o las imágenes a la vista, la vista previa enseña la carta seleccionada.
+  const focus = $derived(stepId === 'cartas' || stepId === 'imagenes' ? { type: current, card: row } : undefined);
+
   $effect(() => {
     const snap = $state.snapshot(answers) as WizardAnswers;
-    saveDraft(snap, step);
+    const f = focus;
+    const images = imageMap;
+    const sid = stepId;
     let cancelled = false;
     const t = setTimeout(async () => {
+      saveDraft(snap, sid);
       try {
-        const lp = await previewProject(snap);
+        const lp = await previewProject(snap, { focus: f, images });
         if (cancelled) return lp.assets.dispose();
         swap(preview);
         preview = lp;
@@ -95,7 +127,7 @@
     let cancelled = false;
     (async () => {
       const next: Partial<Record<DesignId, LoadedProject>> = {};
-      for (const d of DESIGNS) next[d.id] = await previewProject(snap, d.id);
+      for (const d of DESIGNS) next[d.id] = await previewProject(snap, { design: d.id });
       if (cancelled) return Object.values(next).forEach((lp) => lp?.assets.dispose());
       Object.values(designPreviews).forEach((lp) => swap(lp ?? null));
       designPreviews = next;
@@ -197,17 +229,222 @@
     step = 0;
     reached = 0;
     current = 0;
+    row = 0;
+    imageMap = new Map();
+    match = null;
   }
+
+  // ------------------------------------------------------------ progreso
+
+  let notice = $state('');
+  let progressInput: HTMLInputElement;
+
+  function saveProgress() {
+    const json = progressJson($state.snapshot(answers) as WizardAnswers, stepId);
+    downloadBlob(new Blob([json], { type: 'application/json' }), `${slug(answers.name)}.asistente.json`);
+    notice = 'Progreso guardado. Para seguir otro día, abre el asistente y pulsa «Cargar progreso…».';
+  }
+
+  async function loadProgress(file: File) {
+    try {
+      const p = parseProgress(await file.text());
+      answers = p.answers;
+      step = stepIndex(p.step);
+      reached = Math.max(step, STEPS.length - 1);
+      current = 0;
+      row = 0;
+      const pending = pendingImages();
+      notice = `Progreso de «${p.answers.name}» cargado.` + (pending ? ` ${pending} cartas usan imágenes de una carpeta: vuelve a elegirla en el paso «Imágenes».` : '');
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // ------------------------------------------------------------ ajuste fino
+
+  const PIECE_LABELS: Record<string, string> = {
+    fondo: 'Fondo de la carta',
+    cabecera: 'Banda del título',
+    'caja de texto': 'Caja de texto',
+    'banda tipo': 'Banda de la línea de tipo',
+    'fondo atributos': 'Fondo de los atributos',
+    panel: 'Panel de texto',
+    placa: 'Placa del nombre',
+    marco: 'Marco de la carta',
+    'marco ilustracion': 'Marco de la ilustración',
+  };
+  const TEXT_LABELS: Record<string, string> = {
+    titulo: 'Título',
+    'linea de tipo': 'Línea de tipo',
+    reglas: 'Reglas',
+    ambientacion: 'Ambientación',
+    numero: 'Número de colección',
+  };
+  const COLORS: [PieceColor, string][] = [
+    ['principal', 'Principal'],
+    ['acento', 'Acento'],
+    ['papel', 'Papel'],
+    ['tinta', 'Tinta'],
+    ['none', 'Transparente'],
+  ];
+  let showPieces = $state(true);
+
+  const tplZones = $derived(preview?.project.templates[typeKey({ label: previewLabel(currentType?.label) })]?.zones ?? []);
+  const pieces = $derived(tplZones.filter((z) => z.type === 'shape' && PIECE_LABELS[z.id]));
+  const texts = $derived(tplZones.filter((z) => z.type === 'text' && TEXT_LABELS[z.id]));
+
+  function piece(id: string) {
+    return (answers.fine.pieces[id] ??= {});
+  }
+  function text(id: string) {
+    return (answers.fine.texts[id] ??= {});
+  }
+
+  // ------------------------------------------------------------ tabla
+
+  let lang = $state('');
+  const tableLang = $derived(answers.langs.includes(lang) ? lang : answers.langs[0]);
+  const columns = $derived<TableColumn[]>(currentType ? tableColumns(answers, [currentType], tableLang) : []);
+  const ids = $derived(cardIds(answers.types));
+  let csvInput: HTMLInputElement;
+  let importReport = $state<ImportReport | null>(null);
+
+  function cell(t: TypeAnswer, k: number, key: string): string {
+    return t.cards?.[k]?.[key] ?? '';
+  }
+
+  function setCell(t: TypeAnswer, k: number, key: string, v: string) {
+    t.cards ??= [];
+    while (t.cards.length <= k) t.cards.push({});
+    if (v.trim()) t.cards[k][key] = v;
+    else delete t.cards[k][key];
+  }
+
+  /** Lo que se usará si la celda se queda vacía. */
+  function placeholder(c: TableColumn, k: number): string {
+    const label = previewLabel(currentType?.label);
+    const ph = PLACEHOLDERS[tableLang] ?? PLACEHOLDERS.es;
+    const base = c.key.replace(/-[a-z]{2}$/, '');
+    if (c.key === 'id') return ids[current]?.(k + 1) ?? '';
+    if (base === 'titulo') return `${label} ${k + 1}`;
+    if (base === 'subtipo') return label;
+    if (base === 'descripcion') return ph.rules;
+    if (base === 'sabor') return ph.flavor;
+    if (c.kind === 'image') return 'provisional';
+    if (c.key === 'copias') return '1';
+    return '';
+  }
+
+  function addCard() {
+    if (!currentType || currentType.count >= MAX_ROWS_PER_TYPE) return;
+    currentType.count++;
+    row = currentType.count - 1;
+  }
+
+  function removeCard(k: number) {
+    if (!currentType || currentType.count <= 1) return;
+    currentType.cards?.splice(k, 1);
+    currentType.count--;
+    row = Math.min(row, currentType.count - 1);
+  }
+
+  async function importFile(file: File) {
+    try {
+      const { types, report } = importCsv($state.snapshot(answers) as WizardAnswers, await file.text(), current);
+      answers.types = types;
+      importReport = report;
+      row = 0;
+      if (!Object.keys(report.byType).length) error = 'No se ha importado ninguna carta: revisa que la columna «tipo» use los nombres de tus tipos.';
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  function downloadCsv() {
+    const csv = fillCsv($state.snapshot(answers) as WizardAnswers);
+    downloadBlob(new Blob([csv], { type: 'text/csv' }), `${slug(answers.name)}-cartas.csv`);
+  }
+
+  // ------------------------------------------------------------ imágenes
+
+  const fileKeyOf = (label: string | undefined) => fileKey(label?.trim() || 'criatura');
+
+  /** Ruta dentro de la carpeta elegida → archivo. Solo en memoria: no se guarda en el borrador. */
+  let imageMap = $state.raw<Map<string, File>>(new Map());
+  let byOrder = $state(true);
+  let match = $state.raw<MatchResult | null>(null);
+  let folderInput: HTMLInputElement;
+  const imagePaths = $derived([...imageMap.keys()].map((p) => `${IMAGES_DIR}/${p}`));
+
+  function cardRefs(): CardRef[] {
+    return answers.types.flatMap((t, type) =>
+      Array.from({ length: t.count }, (_, index) => ({
+        type,
+        index,
+        id: cell(t, index, 'id') || ids[type]?.(index + 1) || '',
+        titles: answers.langs.map((l) => cell(t, index, textKey('titulo', l, answers.langs))).filter(Boolean),
+      })),
+    );
+  }
+
+  function runMatch() {
+    const result = matchImages(cardRefs(), [...imageMap.keys()], answers.types.map((t) => t.label), byOrder);
+    answers.types.forEach((t, type) => {
+      for (let index = 0; index < t.count; index++) {
+        const path = result.assigned.get(cardRefKey(type, index));
+        if (path) setCell(t, index, 'ilustracion', `${IMAGES_DIR}/${path}`);
+      }
+    });
+    match = result;
+  }
+
+  function pickFolder(list: FileList | null) {
+    if (!list?.length) return;
+    const map = new Map<string, File>();
+    for (const file of Array.from(list)) {
+      // Rutas relativas a la carpeta elegida: «criatura/01.png».
+      const path = (file.webkitRelativePath || file.name).split('/').slice(1).join('/') || file.name;
+      if (IMAGE_FILE.test(path)) map.set(path, file);
+    }
+    imageMap = map;
+    runMatch();
+  }
+
+  /** Cartas que apuntan a imágenes de la carpeta que no están cargadas (p. ej. tras recargar la página). */
+  function pendingImages(): number {
+    let n = 0;
+    for (const t of answers.types)
+      for (const c of t.cards ?? []) {
+        const img = c.ilustracion ?? '';
+        if (img.startsWith(`${IMAGES_DIR}/`) && !imageMap.has(img.slice(IMAGES_DIR.length + 1))) n++;
+      }
+    return n;
+  }
+
+  const imageStats = $derived(
+    answers.types.map((t) => {
+      let own = 0;
+      for (let k = 0; k < t.count; k++) if (cell(t, k, 'ilustracion')) own++;
+      return { label: t.label, own, total: t.count };
+    }),
+  );
 
   // ------------------------------------------------------------ crear
 
   const summary = $derived.by(() => {
     const cards = answers.types.reduce((s, t) => s + (t.count || 0), 0);
-    return { cards, types: answers.types.length };
+    let written = 0;
+    for (const t of answers.types) for (const c of (t.cards ?? []).slice(0, t.count)) if (Object.keys(c).some((k) => k !== 'id' && k !== 'ilustracion')) written++;
+    const images = imageStats.reduce((s, x) => s + x.own, 0);
+    return { cards, types: answers.types.length, written, images };
   });
 
-  function files(): Record<string, string> {
-    return projectFiles(buildProject($state.snapshot(answers) as WizardAnswers));
+  /** El proyecto completo: archivos generados más las imágenes elegidas que usa alguna carta. */
+  function files(): Record<string, string | Blob> {
+    const snap = $state.snapshot(answers) as WizardAnswers;
+    const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
+    const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
+    return { ...projectFiles(buildProject(snap)), ...imageFiles(images) };
   }
 
   async function run(label: string, fn: () => Promise<void>) {
@@ -249,10 +486,10 @@
   }
 </script>
 
-{#snippet card(lp: LoadedProject | null | undefined, label: string, o: RenderOptions, back = false)}
-  {@const row = back ? backRow(lp ?? null, label) : rowOfType(lp ?? null, label)}
-  {#if lp && row}
-    <CardView {row} {lp} opts={{ ...o, lang: lp.langs[0] ?? '' }} />
+{#snippet card(lp: LoadedProject | null | undefined, label: string, o: RenderOptions, back = false, index = 0)}
+  {@const r = back ? backRow(lp ?? null, label) : rowOfType(lp ?? null, label, index)}
+  {#if lp && r}
+    <CardView row={r} {lp} opts={{ ...o, lang: (stepId === 'cartas' && tableLang) || lp.langs[0] || '' }} />
   {:else}
     <div class="placeholder">Dibujando…</div>
   {/if}
@@ -268,6 +505,11 @@
   {/if}
 {/snippet}
 
+<input type="file" hidden accept=".json,application/json" bind:this={progressInput} onchange={(e) => { const f = e.currentTarget.files?.[0]; if (f) loadProgress(f); e.currentTarget.value = ''; }} />
+<input type="file" hidden accept=".csv,.txt,text/csv" bind:this={csvInput} onchange={(e) => { const f = e.currentTarget.files?.[0]; if (f) importFile(f); e.currentTarget.value = ''; }} />
+<input type="file" hidden multiple bind:this={folderInput} {...{ webkitdirectory: true }} onchange={(e) => { pickFolder(e.currentTarget.files); e.currentTarget.value = ''; }} />
+<datalist id="wz-images">{#each imagePaths as p}<option value={p}></option>{/each}</datalist>
+
 <div class="wizard">
   <nav class="steps">
     <h3>Asistente</h3>
@@ -282,6 +524,8 @@
       {/each}
     </ol>
     <div class="nav-foot">
+      <button class="small" onclick={saveProgress} title="Descarga un archivo para seguir otro día o en otro ordenador">Guardar progreso</button>
+      <button class="ghost small" onclick={() => progressInput.click()}>Cargar progreso…</button>
       <button class="ghost small" onclick={restart}>Empezar de cero</button>
       <button class="ghost small" onclick={oncancel}>Salir</button>
     </div>
@@ -544,6 +788,112 @@
         </div>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={answers.adjust.rounded} /> Esquinas redondeadas en cajas y bandas</label>
+    {:else if stepId === 'fino'}
+      <h2>Ajuste fino</h2>
+      <p class="lead">
+        Opcional: retoca cada pieza del diseño. Los cambios valen para todos los tipos. Puedes saltarte este paso y volver cuando
+        quieras.
+      </p>
+      {@render typeTabs()}
+      {#if uses('art') && (uses('rules') || uses('flavor'))}
+        <label class="field">
+          <span>Tamaño de la caja de texto: {Math.round((1 - answers.adjust.art) * 100)} %</span>
+          <input
+            type="range"
+            min="0.25"
+            max="0.7"
+            step="0.05"
+            value={1 - answers.adjust.art}
+            oninput={(e) => (answers.adjust.art = Math.round((1 - e.currentTarget.valueAsNumber) * 100) / 100)}
+          />
+          <small class="hint">El resto del espacio es para la ilustración.</small>
+        </label>
+      {/if}
+      <div class="field">
+        <span>Piezas</span>
+        <table class="fine">
+          <tbody>
+            {#each pieces as z (z.id)}
+              {@const cur = answers.fine.pieces[z.id] ?? {}}
+              {@const fill = cur.fill ?? ((z.type === 'shape' && z.fill) || 'none')}
+              {@const opacity = cur.opacity ?? (z.type === 'shape' ? (z.opacity ?? 1) : 1)}
+              {@const border = cur.border ?? (z.type === 'shape' && !!z.stroke)}
+              <tr>
+                <th>{PIECE_LABELS[z.id]}</th>
+                <td>
+                  <div class="swatches">
+                    {#each COLORS as [c, name]}
+                      <button
+                        class="sw"
+                        class:active={fill === c}
+                        class:none={c === 'none'}
+                        title={name}
+                        aria-label="{PIECE_LABELS[z.id]}: {name}"
+                        style:background={c === 'none' ? undefined : answers.adjust.palette[c]}
+                        onclick={() => (piece(z.id).fill = c)}
+                      ></button>
+                    {/each}
+                  </div>
+                </td>
+                <td>
+                  <label class="inline" title="Opacidad">
+                    <input type="range" min="0" max="1" step="0.05" value={opacity} oninput={(e) => (piece(z.id).opacity = e.currentTarget.valueAsNumber)} />
+                    {Math.round(opacity * 100)} %
+                  </label>
+                </td>
+                <td>
+                  <label class="inline"><input type="checkbox" checked={border} onchange={(e) => (piece(z.id).border = e.currentTarget.checked)} /> Borde</label>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      </div>
+      <div class="field">
+        <span>Textos</span>
+        <table class="fine">
+          <tbody>
+            {#each texts as z (z.id)}
+              {@const cur = answers.fine.texts[z.id] ?? {}}
+              <tr>
+                <th>{TEXT_LABELS[z.id]}</th>
+                <td>
+                  <div class="swatches">
+                    {#each COLORS.filter(([c]) => c !== 'none') as [c, name]}
+                      <button
+                        class="sw"
+                        class:active={cur.color === c}
+                        title={name}
+                        aria-label="{TEXT_LABELS[z.id]}: {name}"
+                        style:background={answers.adjust.palette[c as keyof typeof answers.adjust.palette]}
+                        onclick={() => (text(z.id).color = c as never)}
+                      ></button>
+                    {/each}
+                  </div>
+                </td>
+                <td colspan="2">
+                  <label class="inline" title="Tamaño de letra">
+                    <input
+                      type="range"
+                      min="0.7"
+                      max="1.5"
+                      step="0.05"
+                      value={cur.scale ?? 1}
+                      oninput={(e) => (text(z.id).scale = e.currentTarget.valueAsNumber)}
+                    />
+                    {Math.round((cur.scale ?? 1) * 100)} %
+                  </label>
+                </td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+        <p class="hint">Si pones una caja transparente sobre la ilustración, cambia el color de su texto para que se lea.</p>
+      </div>
+      <div class="row">
+        <label class="check"><input type="checkbox" bind:checked={showPieces} /> Señalar las piezas en la carta</label>
+        <button class="small" onclick={() => (answers.fine = { pieces: {}, texts: {} })}>Restablecer el ajuste fino</button>
+      </div>
     {:else if STEPS[step].id === 'traseras'}
       <h2>Traseras</h2>
       <p class="lead">¿Cómo es el dorso de las cartas?</p>
@@ -554,6 +904,120 @@
           </button>
         {/each}
       </div>
+    {:else if stepId === 'cartas'}
+      <h2>Las cartas</h2>
+      <p class="lead">
+        Cada fila es una carta. Todo se guarda como una <b>tabla</b> (un archivo CSV) que también puedes abrir con Excel o Google Sheets.
+        Lo que dejes vacío se rellena con un texto de ejemplo y queda como pendiente.
+      </p>
+      <div class="toolbar">
+        {@render typeTabs()}
+        {#if answers.langs.length > 1}
+          <div class="tabs">
+            {#each answers.langs as l}<button class:active={tableLang === l} onclick={() => (lang = l)}>{l.toUpperCase()}</button>{/each}
+          </div>
+        {/if}
+        <span class="grow"></span>
+        <button class="small" onclick={downloadCsv} title="Una fila por carta y una columna por campo, para rellenarla con calma">Descargar CSV para rellenar</button>
+        <button class="small" onclick={() => csvInput.click()}>Importar CSV…</button>
+      </div>
+      {#if importReport}
+        <div class="report">
+          Importadas: {Object.entries(importReport.byType).map(([t, n]) => `${n} de «${t}»`).join(', ') || 'ninguna'}.
+          {#if importReport.unknownTypes.length}<br />Tipos que no existen en el asistente (filas ignoradas): {importReport.unknownTypes.join(', ')}.{/if}
+          {#if importReport.ignored.length}<br />Columnas ignoradas: {importReport.ignored.join(', ')}.{/if}
+          <button class="ghost small" onclick={() => (importReport = null)}>✕</button>
+        </div>
+      {/if}
+      {#if currentType}
+        <div class="grid-wrap">
+          <table class="cards">
+            <thead>
+              <tr>
+                <th>#</th>
+                {#each columns as c}<th class={c.kind}>{c.label}</th>{/each}
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each Array.from({ length: currentType.count }, (_, k) => k) as k (k)}
+                <tr class:selected={k === row} onfocusin={() => (row = k)} onclick={() => (row = k)}>
+                  <td class="n">{k + 1}</td>
+                  {#each columns as c (c.key)}
+                    <td class={c.kind}>
+                      {#if c.kind === 'long'}
+                        <textarea rows="2" value={cell(currentType, k, c.key)} placeholder={placeholder(c, k)} oninput={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}></textarea>
+                      {:else if c.kind === 'variant'}
+                        <select value={cell(currentType, k, c.key)} onchange={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}>
+                          <option value="">(automática)</option>
+                          {#each answers.variant.values.filter((v) => v.name.trim()) as v}<option value={v.name}>{v.name}</option>{/each}
+                        </select>
+                      {:else}
+                        <input
+                          type="text"
+                          list={c.kind === 'image' ? 'wz-images' : undefined}
+                          value={cell(currentType, k, c.key)}
+                          placeholder={placeholder(c, k)}
+                          oninput={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}
+                        />
+                      {/if}
+                    </td>
+                  {/each}
+                  <td><button class="ghost small" title="Quitar esta carta" onclick={() => removeCard(k)} disabled={currentType.count <= 1}>✕</button></td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+        <button class="small" onclick={addCard}>＋ Carta</button>
+        <p class="hint">
+          En las reglas: <code>**negrita**</code>, <code>*cursiva*</code> y <code>{'{atributo}'}</code> para poner su icono. Los números vacíos se
+          rellenan con valores de ejemplo. ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
+        </p>
+      {/if}
+    {:else if stepId === 'imagenes'}
+      <h2>Imágenes</h2>
+      <p class="lead">¿Tienes ya las ilustraciones? Si no, se usan las provisionales y podrás cambiarlas cuando quieras.</p>
+      <div class="field">
+        <span>Elige la carpeta con tus imágenes</span>
+        <p class="hint">Se emparejan solas con las cartas, en este orden:</p>
+        <ol class="rules">
+          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'CRI-001'}.png</code></li>
+          <li>El nombre del archivo es el <b>título</b>: <code>guardian-de-ceniza.jpg</code> (sin importar mayúsculas, tildes ni espacios).</li>
+          <li>
+            <label class="check">
+              <input type="checkbox" bind:checked={byOrder} onchange={() => imageMap.size && runMatch()} />
+              Las demás, por <b>orden alfabético</b> dentro de una subcarpeta con el nombre del tipo: <code>{fileKeyOf(answers.types[0]?.label)}/01.png</code>
+            </label>
+          </li>
+        </ol>
+        <div class="row">
+          <button class="primary" onclick={() => folderInput.click()}>Elegir carpeta de imágenes…</button>
+          {#if imageMap.size}<button class="small" onclick={runMatch}>Volver a emparejar</button>{/if}
+        </div>
+        <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
+      </div>
+      {#if match}
+        <div class="report">
+          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.title} por título, {match.byRule.order} por orden.
+          {#if match.unused.length}<br />Sin usar ({match.unused.length}): {match.unused.slice(0, 8).join(', ')}{match.unused.length > 8 ? '…' : ''}{/if}
+        </div>
+      {/if}
+      {#if pendingImages()}
+        <p class="warn">{pendingImages()} cartas usan imágenes de una carpeta que ya no está cargada: vuelve a elegirla.</p>
+      {/if}
+      <table class="fine">
+        <tbody>
+          {#each imageStats as st, i}
+            <tr>
+              <th>{st.label}</th>
+              <td>{st.own} de {st.total} con imagen propia</td>
+              <td><button class="ghost small" onclick={() => { current = i; go(stepIndex('cartas')); }}>Revisar en la tabla</button></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="hint">Puedes cambiar la imagen de cualquier carta en la columna «Ilustración» de la tabla.</p>
     {:else}
       <h2>Crear el proyecto</h2>
       <ul class="summary">
@@ -561,10 +1025,14 @@
         <li>{summary.types} {summary.types === 1 ? 'tipo' : 'tipos'} y {summary.cards} cartas: {labels.join(', ')}</li>
         <li>Diseño «{DESIGNS.find((d) => d.id === answers.design)?.label}», idiomas: {answers.langs.join(', ')}</li>
         <li>Traseras: {answers.backs === 'common' ? 'una para todas' : answers.backs === 'per-type' ? 'una por tipo' : 'ninguna'}</li>
+        <li>{summary.written} de {summary.cards} cartas con datos propios · {summary.images} con ilustración propia</li>
       </ul>
+      {#if pendingImages()}
+        <p class="warn">{pendingImages()} cartas usan imágenes que no están cargadas: vuelve al paso «Imágenes» y elige la carpeta.</p>
+      {/if}
       <p class="lead">
-        Se crea la carpeta del proyecto con la tabla de cartas ya rellena de ejemplos e imágenes provisionales. Después solo tendrás que
-        poner tus ilustraciones y escribir los textos: el panel de pendientes te dirá qué falta.
+        Se crea la carpeta del proyecto con tu tabla de cartas y tus imágenes; lo que falte se rellena con ejemplos e imágenes
+        provisionales, y el panel de pendientes te dirá qué queda.
       </p>
       <div class="create">
         {#if window.showDirectoryPicker}
@@ -579,6 +1047,7 @@
       {/if}
     {/if}
 
+    {#if notice}<div class="report">{notice} <button class="ghost small" onclick={() => (notice = '')}>✕</button></div>{/if}
     {#if error}<p class="error">{error}</p>{/if}
     {#if problems.length}
       <ul class="problems">{#each problems as p}<li>{p}</li>{/each}</ul>
@@ -603,9 +1072,17 @@
     {:else if STEPS[step].id === 'diseno'}
       {@render card(designPreviews[answers.design], currentType?.label ?? '', opts)}
       <small>{DESIGNS.find((d) => d.id === answers.design)?.label} · {previewLabel(currentType?.label)}</small>
+    {:else if focus}
+      {@render typeTabs()}
+      {@render card(preview, currentType?.label ?? '', opts, false, row)}
+      <div class="stepper">
+        <button class="small" onclick={() => (row = Math.max(0, row - 1))} disabled={row === 0}>◀</button>
+        <small>{previewLabel(currentType?.label)} · carta {row + 1} de {currentType?.count}</small>
+        <button class="small" onclick={() => (row = Math.min((currentType?.count ?? 1) - 1, row + 1))} disabled={row >= (currentType?.count ?? 1) - 1}>▶</button>
+      </div>
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
-      {@render card(preview, currentType?.label ?? '', opts)}
+      {@render card(preview, currentType?.label ?? '', stepId === 'fino' && showPieces ? { ...opts, zones: true } : opts)}
       <small>{previewLabel(currentType?.label)} · vista previa</small>
     {/if}
   </aside>
@@ -1002,6 +1479,141 @@
     color: var(--muted);
     border: 1px dashed var(--border);
     border-radius: 6px;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .grow {
+    flex: 1;
+  }
+  .report {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    position: relative;
+    padding-right: 34px;
+  }
+  .report > button {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+  }
+  .grid-wrap {
+    overflow: auto;
+    max-height: 52vh;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  table.cards {
+    border-collapse: collapse;
+    font-size: 12px;
+    min-width: 100%;
+  }
+  table.cards thead th {
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    color: var(--muted);
+    font-weight: normal;
+    text-align: left;
+    padding: 6px;
+    white-space: nowrap;
+    z-index: 1;
+  }
+  table.cards td {
+    padding: 3px;
+    border-top: 1px solid var(--border);
+    vertical-align: top;
+  }
+  table.cards td.n {
+    color: var(--muted);
+    text-align: right;
+    padding: 8px 6px;
+  }
+  table.cards tr.selected {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  table.cards input,
+  table.cards select,
+  table.cards textarea {
+    width: 100%;
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+  table.cards textarea {
+    font: inherit;
+    color: inherit;
+    background: #2b2f38;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    resize: vertical;
+  }
+  table.cards .id {
+    min-width: 90px;
+  }
+  table.cards .text {
+    min-width: 150px;
+  }
+  table.cards .long {
+    min-width: 240px;
+  }
+  table.cards .number {
+    width: 64px;
+  }
+  table.cards .variant {
+    min-width: 110px;
+  }
+  table.cards .image {
+    min-width: 190px;
+  }
+  table.fine {
+    border-collapse: collapse;
+  }
+  table.fine th {
+    text-align: left;
+    font-weight: normal;
+    padding: 6px 14px 6px 0;
+    white-space: nowrap;
+  }
+  table.fine td {
+    padding: 6px 10px 6px 0;
+  }
+  .swatches {
+    display: flex;
+    gap: 4px;
+  }
+  .sw {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border-radius: 5px;
+    border: 2px solid var(--border);
+  }
+  .sw.none {
+    background: repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0 / 8px 8px;
+  }
+  .sw.active {
+    border-color: #fff;
+    outline: 2px solid var(--accent);
+  }
+  .rules {
+    margin: 0;
+    padding-left: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+  }
+  .stepper {
+    display: flex;
+    gap: 10px;
+    align-items: center;
   }
   @media (max-width: 900px) {
     .wizard {
