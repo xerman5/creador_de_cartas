@@ -130,6 +130,29 @@ export class FileListSource implements FileSource {
   }
 }
 
+/** Archivos en memoria: el proyecto del asistente antes de guardarlo. */
+export class MemorySource implements FileSource {
+  private files = new Map<string, Blob>();
+
+  constructor(
+    public label: string,
+    files: Record<string, string | Blob>,
+  ) {
+    for (const [path, data] of Object.entries(files)) {
+      this.files.set(cleanPath(path).toLowerCase(), typeof data === 'string' ? new Blob([data]) : data);
+    }
+  }
+
+  async read(path: string) {
+    return this.files.get(cleanPath(path).toLowerCase()) ?? null;
+  }
+
+  async list(dir: string) {
+    const prefix = `${cleanPath(dir)}/`.toLowerCase();
+    return [...this.files.keys()].filter((p) => p.startsWith(prefix)).map((p) => p.slice(prefix.length)).sort();
+  }
+}
+
 /** Proyecto servido por HTTP (el ejemplo incluido). */
 export class UrlSource implements FileSource {
   constructor(

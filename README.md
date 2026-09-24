@@ -12,6 +12,23 @@ npm run check        # tipos
 
 Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; hay que activar **Settings → Pages → Source: GitHub Actions** una vez). `dist/` funciona en cualquier hosting estático con HTTPS.
 
+## Asistente
+
+«Nuevo…» abre un asistente que pregunta cómo es el juego y deja el proyecto listo para rellenar:
+
+1. **Tu juego**: nombre, tamaño de carta e idiomas.
+2. **Tipos de carta** y cuántas de cada uno.
+3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos, rareza o facción, número de colección. Un tipo puede ser «igual que» otro.
+4. **Atributos y rareza**: nombre y color de cada uno, cuáles lleva cada tipo, valores de la rareza.
+5. **Diseño**: cuatro diseños base (clásico, ilustración completa, retrato, texto) dibujados con tu contenido.
+6. **Ajustes**: paleta, tipografía, tamaño de la ilustración, lado de los atributos, esquina del coste, esquinas redondeadas.
+7. **Traseras**: una para todas, una por tipo o ninguna.
+8. **Crear**: en una carpeta (Chrome/Edge), como .zip o de prueba sin guardar.
+
+El resultado es un proyecto normal: plantillas editables, CSV con filas de ejemplo en cada idioma y las columnas exactas, e imágenes provisionales en `assets/provisional/`. La galería muestra un panel **Pendiente** con lo que falta (ilustraciones, iconos, textos de relleno). El borrador del asistente se guarda en el navegador.
+
+Los diseños se prueban con todas las combinaciones de elementos, tamaños y ajustes: ningún texto en la zona peligrosa, sin solapes y con sitio mínimo para textos, iconos e ilustración.
+
 ## Flujo de trabajo
 
 1. **Proyecto**: tamaño de carta, margen de seguridad, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
@@ -169,6 +186,8 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   color.ts        paleta y colores desde el CSV
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
+  pending.ts      lo que falta para terminar la baraja
+  wizard/         asistente: respuestas, diseños base, imágenes provisionales, generación del proyecto
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip
   metadata.ts     ppp y perfil sRGB en PNG/JPG
   assets.ts       lectura de archivos (carpeta, lista, URL) y caché de imágenes
@@ -176,7 +195,8 @@ src/lib/      componentes Svelte
   workspace.svelte.ts   estado: abrir, editar (inmutable), deshacer, guardar
   TemplateEditor / Stage / ZoneProps   editor de anatomía
   ProjectSettings                      configuración
-  CardsView / CardDetail               galería y exportación
+  CardsView / CardDetail               galería, pendientes y exportación
+  wizard/Wizard                        asistente de proyecto nuevo
 ```
 
 ## Próximos pasos

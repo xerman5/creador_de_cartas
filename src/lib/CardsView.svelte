@@ -3,6 +3,7 @@
   import { planExport } from '../core/deck';
   import { exportFiles, exportSettings, saveToFolder, saveZip, slug, type ExportOptions } from '../core/export';
   import type { ExportSettings } from '../core/types';
+  import { pendingItems } from '../core/pending';
   import { projectIssues } from '../core/project';
   import { renderCard, type RenderOptions } from '../core/render';
   import { normalizeKey } from '../core/text';
@@ -73,6 +74,7 @@
   const imageCount = $derived(plan.fronts.length + plan.backs.length);
 
   const issues = $derived([...lp.errors, ...projectIssues(lp)]);
+  const pending = $derived(pendingItems(lp));
   const allWarnings = $derived([
     ...plan.warnings.map((w) => ({ index: w.index, id: lp.rows[w.index]?.id ?? '', w: w.message })),
     ...Object.entries(warnings).flatMap(([i, ws]) => ws.map((w) => ({ index: +i, id: lp.rows[+i]?.id ?? '', w }))),
@@ -146,6 +148,23 @@
         {lp.project.card.width}×{lp.project.card.height} mm + {BLEED_MM} mm de sangrado
       </p>
     </section>
+
+    {#if pending.length}
+      <section class="pending">
+        <h4>Pendiente</h4>
+        <ul>
+          {#each pending as item (item.id)}
+            <li>
+              <span>{item.label}</span>
+              {#if item.rows.length}
+                <button class="link" onclick={() => (selected = item.rows[0])} title="Abrir la primera">ver</button>
+              {/if}
+              <small>{item.hint}</small>
+            </li>
+          {/each}
+        </ul>
+      </section>
+    {/if}
 
     <section>
       <h4>Exportar</h4>
@@ -324,6 +343,31 @@
   }
   .muted {
     color: var(--muted);
+  }
+  .pending {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .pending ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .pending li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 8px;
+    align-items: baseline;
+  }
+  .pending small {
+    grid-column: 1 / -1;
+    color: var(--muted);
+    font-size: 11px;
   }
   .warnings {
     list-style: none;
