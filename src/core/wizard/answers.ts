@@ -9,8 +9,8 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
   { key: 'rules', label: 'Texto de reglas', hint: 'Lo que hace la carta. Admite iconos: {ataque}.' },
   { key: 'flavor', label: 'Texto de ambientación', hint: 'Una frase en cursiva que no afecta al juego.' },
   { key: 'cost', label: 'Coste', hint: 'Un número en una esquina: lo que cuesta jugarla.' },
-  { key: 'stats', label: 'Atributos', hint: 'Valores con icono: ataque, vida, velocidad…' },
-  { key: 'variant', label: 'Rareza o facción', hint: 'Una marca de color que cambia según la carta.' },
+  { key: 'stats', label: 'Atributos', hint: 'Números con icono que cambian en cada carta: Ataque 3, Vida 5…' },
+  { key: 'variant', label: 'Rareza, clan o facción', hint: 'Una categoría con su color: común/rara, un clan, una facción…' },
   { key: 'number', label: 'Número de colección', hint: '«012/120» en el pie de la carta.' },
 ];
 
@@ -93,7 +93,7 @@ export function defaultAnswers(): WizardAnswers {
     name: 'Mi juego',
     langs: ['es'],
     size: { width: 63, height: 88 },
-    types: [{ label: 'Carta', count: 20, elements: ['art', 'rules', 'flavor', 'number'], attributes: [] }],
+    types: [{ label: '', count: 20, elements: ['art', 'rules', 'flavor', 'number'], attributes: [] }],
     attributes: [
       { label: 'Ataque', color: '#d9534f' },
       { label: 'Vida', color: '#4caf50' },

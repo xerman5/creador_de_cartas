@@ -81,7 +81,9 @@ describe('buildProject', () => {
   });
 
   it('sin atributos ni coste no hay columna de atributos; la paleta está en el proyecto', async () => {
-    const { lp } = await load(defaultAnswers());
+    const a = defaultAnswers();
+    a.types[0].label = 'Carta';
+    const { lp } = await load(a);
     expect(lp.columns).not.toContain('atributos');
     expect(lp.project.attributes).toEqual({});
     expect(lp.project.colors).toMatchObject({ principal: '#1f3a5f', papel: '#efe6d2' });

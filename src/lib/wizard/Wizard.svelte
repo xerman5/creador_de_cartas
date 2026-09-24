@@ -20,7 +20,7 @@
   import { buildProject, MAX_ROWS_PER_TYPE, projectFiles } from '../../core/wizard/build';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
-  import { backRow, clearDraft, loadDraft, previewProject, rowOfType, saveDraft } from './preview';
+  import { backRow, clearDraft, loadDraft, previewLabel, previewProject, rowOfType, saveDraft } from './preview';
 
   let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
 
@@ -334,7 +334,7 @@
         <tbody>
           {#each answers.types as t, i}
             <tr>
-              <td><input type="text" bind:value={t.label} placeholder="Nombre del tipo" /></td>
+              <td><input type="text" bind:value={t.label} placeholder={i === 0 ? 'p. ej. Criatura' : 'p. ej. Hechizo'} /></td>
               <td><input type="number" min="1" max={MAX_ROWS_PER_TYPE} bind:value={t.count} /></td>
               <td>
                 {#if answers.types.length > 1}<button class="ghost small" onclick={() => removeType(i)} title="Quitar">✕</button>{/if}
@@ -384,7 +384,14 @@
       {#if uses('stats')}
         <div class="field">
           <span>¿Qué atributos existen en tu juego?</span>
-          <p class="hint">Cada uno tendrá un icono provisional de su color. En los textos, <code>{'{ataque}'}</code> dibuja su icono.</p>
+          <p class="hint">
+            Un atributo es un <b>número con icono</b> que cambia en cada carta: Ataque 3, Vida 5, Velocidad 2. Cada uno tendrá un icono
+            provisional de su color, y en los textos <code>{'{ataque}'}</code> dibuja su icono.
+          </p>
+          <p class="hint">
+            ¿Buscas una categoría como clan, facción o rareza? Eso no es un atributo: vuelve al paso anterior y marca «Rareza, clan o
+            facción».
+          </p>
           {#each answers.attributes as at, i}
             <div class="row attr">
               <input type="color" bind:value={at.color} />
@@ -396,22 +403,45 @@
             ＋ Atributo
           </button>
         </div>
+        {@const named = answers.attributes.filter((at) => attrKey(at))}
+        {@const statTypes = answers.types.filter((t) => !t.sameAs && t.elements.includes('stats'))}
         <div class="field">
-          <span>¿Cuáles lleva cada tipo?</span>
-          {#each answers.types as t}
-            {#if !t.sameAs && t.elements.includes('stats')}
-              <div class="assign">
-                <b>{t.label}</b>
-                <div class="chips">
-                  {#each answers.attributes as at}
-                    {#if attrKey(at)}
-                      <button class="chip" class:active={t.attributes.includes(attrKey(at))} onclick={() => toggleAttr(t, attrKey(at))}>{at.label}</button>
-                    {/if}
+          <span>¿Qué atributos lleva cada tipo de carta?</span>
+          {#if named.length}
+            <p class="hint">Marca las casillas: los atributos marcados aparecen, con su icono y su número, en todas las cartas de ese tipo.</p>
+            <div class="matrix-wrap">
+              <table class="matrix">
+                <thead>
+                  <tr>
+                    <th></th>
+                    {#each named as at}<th><i style:background={at.color}></i>{at.label}</th>{/each}
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each statTypes as t}
+                    <tr>
+                      <th>{t.label || 'Sin nombre'}</th>
+                      {#each named as at}
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={t.attributes.includes(attrKey(at))}
+                            onchange={() => toggleAttr(t, attrKey(at))}
+                            aria-label="{at.label} en {t.label}"
+                          />
+                        </td>
+                      {/each}
+                    </tr>
                   {/each}
-                </div>
-              </div>
-            {/if}
-          {/each}
+                </tbody>
+              </table>
+            </div>
+          {:else}
+            <p class="hint warn">Todavía no hay atributos: añade al menos uno en la lista de arriba.</p>
+          {/if}
+          {#if answers.types.some((t) => t.sameAs)}
+            <p class="hint">Los tipos «igual que» otro usan los atributos de ese tipo.</p>
+          {/if}
         </div>
       {/if}
       {#if uses('cost')}
@@ -572,11 +602,11 @@
       {/if}
     {:else if STEPS[step].id === 'diseno'}
       {@render card(designPreviews[answers.design], currentType?.label ?? '', opts)}
-      <small>{DESIGNS.find((d) => d.id === answers.design)?.label} · {currentType?.label}</small>
+      <small>{DESIGNS.find((d) => d.id === answers.design)?.label} · {previewLabel(currentType?.label)}</small>
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
       {@render card(preview, currentType?.label ?? '', opts)}
-      <small>{currentType?.label} · vista previa</small>
+      <small>{previewLabel(currentType?.label)} · vista previa</small>
     {/if}
   </aside>
 </div>
@@ -836,11 +866,41 @@
     background: var(--accent);
     border-color: var(--accent);
   }
-  .assign {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    flex-wrap: wrap;
+  .matrix-wrap {
+    overflow-x: auto;
+  }
+  .matrix {
+    border-collapse: collapse;
+  }
+  .matrix th,
+  .matrix td {
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    text-align: center;
+    white-space: nowrap;
+  }
+  .matrix thead th {
+    font-weight: normal;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .matrix tbody th {
+    text-align: left;
+    font-weight: 600;
+  }
+  .matrix i {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    margin-right: 5px;
+  }
+  .matrix input {
+    width: 16px;
+    height: 16px;
+  }
+  .warn {
+    color: var(--warn);
   }
   .seg {
     display: flex;
