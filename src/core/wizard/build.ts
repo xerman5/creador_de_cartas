@@ -213,7 +213,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   if (a.backs === 'common') rows.push({ id: 'TRASERA', tipo: BACK_TEMPLATE, [col('titulo', langs[0])]: a.name.trim() });
   if (a.backs === 'per-type') {
     types.forEach((t, i) => {
-      const row: Record<string, string> = { id: backIds.get(typeKey(t))!, tipo: BACK_TEMPLATE, color: shiftColor(palette.papel, i * 47, 0) };
+      const row: Record<string, string> = { id: backIds.get(typeKey(t))!, tipo: BACK_TEMPLATE, color: shiftColor(palette.acento, i * 67, 0.28) };
       for (const l of langs) {
         row[col('titulo', l)] = a.name.trim();
         row[col('subtipo', l)] = t.label.trim();

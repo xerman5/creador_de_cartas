@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { DirectorySource, FileListSource, UrlSource } from './core/assets';
+  import { DirectorySource, FileListSource, UrlSource, type FileSource } from './core/assets';
   import { DEFAULT_CSV, defaultProject, PROJECT_FILE, serializeProject } from './core/project';
   import CardsView from './lib/CardsView.svelte';
   import ProjectSettings from './lib/ProjectSettings.svelte';
   import TemplateEditor from './lib/TemplateEditor.svelte';
+  import Wizard from './lib/wizard/Wizard.svelte';
   import { Workspace } from './lib/workspace.svelte';
 
   type Tab = 'proyecto' | 'plantillas' | 'cartas';
@@ -19,6 +20,20 @@
   let editorKey = $state(0);
   let editTipo = $state('');
   let fileInput: HTMLInputElement;
+  let wizard = $state(false);
+  let notice = $state('');
+
+  function openWizard() {
+    if (confirmDiscard()) wizard = true;
+  }
+
+  async function fromWizard(src: FileSource, note = '') {
+    if (await ws.open(src)) {
+      wizard = false;
+      tab = 'cartas';
+      notice = note;
+    }
+  }
 
   const canReload = $derived(ws.source instanceof DirectorySource || ws.source instanceof UrlSource);
 
@@ -45,7 +60,7 @@
   }
 
   function openExample() {
-    if (confirmDiscard()) ws.open(new UrlSource('ejemplo/', 'ejemplo'));
+    if (confirmDiscard()) ws.open(new UrlSource('ejemplo/', 'ejemplo')).then((ok) => ok && (wizard = false));
   }
 
   /** Crea proyecto.json y cartas.csv en una carpeta (vacía o no) y la abre. */
@@ -134,7 +149,7 @@
   <header class="toolbar">
     <strong class="brand">Creador de cartas</strong>
 
-    {#if ws.lp}
+    {#if ws.lp && !wizard}
       <nav class="tabs">
         {#each TABS as [id, label]}
           <button class:active={tab === id} onclick={() => (tab = id)}>{label}</button>
@@ -144,7 +159,7 @@
 
     <span class="spacer"></span>
 
-    {#if ws.lp}
+    {#if ws.lp && !wizard}
       <button class="ghost" onclick={() => ws.undo()} disabled={!ws.canUndo} title="Deshacer (⌘Z)">↶</button>
       <button class="ghost" onclick={() => ws.redo()} disabled={!ws.canRedo} title="Rehacer (⇧⌘Z)">↷</button>
       <button
@@ -163,7 +178,7 @@
       <span class="sep"></span>
     {/if}
 
-    <button class="ghost" onclick={newProject} disabled={ws.loading}>Nuevo…</button>
+    <button class="ghost" onclick={openWizard} disabled={ws.loading || wizard} title="Crear un proyecto con el asistente">Nuevo…</button>
     <button class="ghost" onclick={openFolder} disabled={ws.loading}>Abrir…</button>
     <button class="ghost" onclick={openExample} disabled={ws.loading}>Ejemplo</button>
     {#if ws.source}
@@ -174,12 +189,17 @@
     {/if}
   </header>
 
+  {#if notice && !wizard}
+    <div class="notice">{notice} <button class="ghost" onclick={() => (notice = '')}>✕</button></div>
+  {/if}
   {#if ws.error}
     <div class="error">{ws.error} <button class="ghost" onclick={() => (ws.error = '')}>✕</button></div>
   {/if}
 
   <div class="body">
-    {#if !ws.lp}
+    {#if wizard}
+      <Wizard oncreate={fromWizard} oncancel={() => (wizard = false)} />
+    {:else if !ws.lp}
       <div class="welcome">
         <h1>Creador de cartas</h1>
         <p>
@@ -187,10 +207,14 @@
           y una carpeta <code>assets/</code> con las imágenes.
         </p>
         <div class="row">
-          <button class="primary" onclick={newProject}>Nuevo proyecto…</button>
+          <button class="primary" onclick={openWizard}>Crear con el asistente</button>
           <button onclick={openFolder}>Abrir carpeta…</button>
           <button onclick={openExample}>Ver el ejemplo</button>
         </div>
+        <p class="alt">
+          El asistente te pregunta cómo es tu juego y deja el proyecto listo para rellenar.
+          {#if window.showDirectoryPicker}¿Prefieres empezar sin nada? <button class="link" onclick={newProject}>Proyecto vacío…</button>{/if}
+        </p>
       </div>
     {:else if tab === 'proyecto'}
       <ProjectSettings {ws} onedit={editTemplate} />
@@ -279,5 +303,24 @@
     gap: 8px;
     justify-content: center;
     flex-wrap: wrap;
+  }
+  .welcome .alt {
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 18px;
+  }
+  .link {
+    all: unset;
+    cursor: pointer;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .notice {
+    background: #1d3355;
+    color: #d7e6ff;
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
 </style>
