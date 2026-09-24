@@ -54,7 +54,8 @@
   const currentType = $derived(answers.types[Math.min(current, answers.types.length - 1)]);
   const labels = $derived(answers.types.map((t) => t.label.trim()));
   const resolved = $derived(answers.types.map((t) => resolvedType(answers, t)));
-  const uses = (e: ElementKey) => answers.types.some((t) => resolvedType(answers, t).elements.has(e));
+  // Lo marcado decide qué se pregunta: si no, marcar «Atributos» sin elegir ninguno escondería la pregunta.
+  const uses = (e: ElementKey) => resolved.some((r) => r.declared.has(e));
 
   // ------------------------------------------------------------ vista previa
 

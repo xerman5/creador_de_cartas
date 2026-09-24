@@ -116,8 +116,15 @@ export function defaultAnswers(): WizardAnswers {
 export const typeKey = (t: Pick<TypeAnswer, 'label'>) => normalizeKey(t.label);
 export const attrKey = (a: Pick<AttrAnswer, 'label'>) => normalizeKey(a.label);
 
-/** Elementos y atributos que usa un tipo, siguiendo «igual que» (sin ciclos). */
-export function resolvedType(answers: WizardAnswers, t: TypeAnswer): { elements: Set<ElementKey>; attributes: string[] } {
+/**
+ * Elementos y atributos de un tipo, siguiendo «igual que» (sin ciclos).
+ * `declared` es lo que el usuario marcó y decide qué preguntar; `elements` es lo que se dibuja:
+ * sin atributos elegidos todavía, la lista de atributos no tiene nada que mostrar.
+ */
+export function resolvedType(
+  answers: WizardAnswers,
+  t: TypeAnswer,
+): { declared: Set<ElementKey>; elements: Set<ElementKey>; attributes: string[] } {
   let cur = t;
   const seen = new Set<string>();
   while (cur.sameAs && !seen.has(typeKey(cur))) {
@@ -128,9 +135,10 @@ export function resolvedType(answers: WizardAnswers, t: TypeAnswer): { elements:
   }
   const known = new Set(answers.attributes.map(attrKey));
   const attributes = cur.attributes.map(normalizeKey).filter((k) => known.has(k));
+  const declared = new Set(cur.elements);
   const elements = new Set(cur.elements);
   if (!attributes.length) elements.delete('stats');
-  return { elements, attributes };
+  return { declared, elements, attributes };
 }
 
 /** Nombre de archivo seguro a partir de una etiqueta. */
