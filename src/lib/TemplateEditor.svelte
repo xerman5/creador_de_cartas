@@ -2,7 +2,7 @@
   import { BLEED_MM, cardSizeFor, safeAreaIssues } from '../core/card';
   import { GUIDE_COLORS, placeholderRow, ZONE_COLORS } from '../core/render';
   import { normalizeKey } from '../core/text';
-  import type { Zone, ZoneType } from '../core/types';
+  import type { Rect, Zone, ZoneType } from '../core/types';
   import { newZone, uniqueId, ZONE_LABELS } from '../core/zones';
   import Stage from './Stage.svelte';
   import ZoneProps from './ZoneProps.svelte';
@@ -52,6 +52,8 @@
   );
   const pxPerMm = $derived(zoom ?? fitPxPerMm);
 
+  /** Tipo de zona que se va a trazar sobre la carta. */
+  let tool = $state<ZoneType | null>(null);
   let grid = $state(0.5);
   let showGuides = $state(true);
   let renderWarnings = $state<string[]>([]);
@@ -60,6 +62,7 @@
   const warnings = $derived([...safeIssues.map((i) => i.message), ...renderWarnings]);
 
   function selectTipo(t: string) {
+    tool = null;
     chosenTipo = t;
     selectedRaw = null;
     previewId = '';
@@ -108,9 +111,16 @@
     ws.update((p) => fn(p.templates[tipo].zones), { coalesce });
   }
 
-  function addZone(type: ZoneType) {
+  /** Con `rect` la zona ocupa lo trazado; si no, se crea con su tamaño por defecto centrada en `point`. */
+  function addZone(type: ZoneType, rect: Rect | null, point: { x: number; y: number }) {
     if (!tpl) return;
     const zone = newZone(type, project, size, tpl.zones.map((z) => z.id));
+    if (rect) zone.rect = rect;
+    else {
+      const { w, h } = zone.rect;
+      const clamp = (v: number, max: number) => Math.round(Math.min(Math.max(v, 0), max) * 2) / 2;
+      zone.rect = { x: clamp(point.x - w / 2, size.width - w), y: clamp(point.y - h / 2, size.height - h), w, h };
+    }
     // Lo nuevo va arriba del todo salvo las imágenes, que suelen ser fondos y marcos: justo encima de la última imagen.
     let at = tpl.zones.length;
     if (type === 'image') at = tpl.zones.map((z) => z.type).lastIndexOf('image') + 1;
@@ -162,7 +172,10 @@
     const i = selected;
     const step = e.shiftKey ? 5 : grid || 0.5;
     const mod = e.metaKey || e.ctrlKey;
-    if (e.key === 'Escape') selectedRaw = null;
+    if (e.key === 'Escape') {
+      if (tool) tool = null;
+      else selectedRaw = null;
+    }
     else if (i === null) return;
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteZone(i);
     else if (mod && e.key.toLowerCase() === 'd') duplicateZone(i);
@@ -208,9 +221,14 @@
         <h4>Zonas <small>(arriba = delante)</small></h4>
         <div class="add">
           {#each ZONE_TYPES as t}
-            <button class="small" style:--c={ZONE_COLORS[t]} onclick={() => addZone(t)}>＋ {ZONE_LABELS[t]}</button>
+            <button class="small" class:active={tool === t} style:--c={ZONE_COLORS[t]} onclick={() => (tool = tool === t ? null : t)}>
+              ＋ {ZONE_LABELS[t]}
+            </button>
           {/each}
         </div>
+        {#if tool}
+          <p class="hint">Traza el rectángulo sobre la carta. Un clic la crea con su tamaño por defecto. Esc cancela.</p>
+        {/if}
         <ul class="list">
           {#each tpl.zones.map((z, i) => ({ z, i })).reverse() as { z, i } (i)}
             <li class="layer" class:active={selected === i} class:dim={z.hidden}>
@@ -226,7 +244,7 @@
               </span>
             </li>
           {:else}
-            <li class="muted">Sin zonas. Añade una con los botones de arriba.</li>
+            <li class="muted">Sin zonas. Elige un tipo arriba y trázala sobre la carta.</li>
           {/each}
         </ul>
       </section>
@@ -263,7 +281,13 @@
 
       <div class="viewport" bind:clientWidth={viewW} bind:clientHeight={viewH}>
         <div class="canvas-wrap">
-          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} {unsafe} bind:selected={selectedRaw} onwarnings={(w) => (renderWarnings = w)} />
+          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} {unsafe}
+            drawType={tool}
+            oncreate={(rect, at) => {
+              if (tool) addZone(tool, rect, at);
+              tool = null;
+            }}
+            bind:selected={selectedRaw} onwarnings={(w) => (renderWarnings = w)} />
         </div>
       </div>
 
@@ -279,7 +303,7 @@
             <i class="line" style:border-color={GUIDE_COLORS.safe}></i>margen de seguridad
           </span>
         {/if}
-        <span class="muted">Arrastra para mover · Alt: sin imanes · Flechas: mover (Mayús ×10) · Supr: borrar · ⌘D: duplicar</span>
+        <span class="muted">Botón ＋ y arrastra sobre la carta: nueva zona · Arrastra para mover · Alt: sin imanes · Flechas: mover (Mayús ×10) · Supr: borrar · ⌘D: duplicar</span>
         {#if warnings.length}
           <span class="warn" title={warnings.join('\n')}>⚠ {warnings.length} aviso{warnings.length > 1 ? 's' : ''}: {warnings[0]}</span>
         {/if}
@@ -565,6 +589,11 @@
   }
   .f input {
     width: 70px;
+  }
+  .hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--accent);
   }
   .zone-actions {
     margin-top: 12px;

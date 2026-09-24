@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dragRect, snapTargets } from './geometry';
+import { dragRect, drawRect, snapTargets } from './geometry';
 import type { Zone } from './types';
 
 const size = { width: 63, height: 88, safe: 3 };
@@ -42,5 +42,20 @@ describe('dragRect', () => {
     const { rect } = dragRect({ x: 10, y: 10, w: 20, h: 10 }, 'e', -40, 0, targets, opts);
     expect(rect.w).toBe(1);
     expect(rect.x).toBe(10);
+  });
+});
+
+describe('drawRect', () => {
+  const targets = snapTargets(size, [], -1);
+  const opts = { grid: 0.5, threshold: 1 };
+
+  it('normaliza el trazo hacia arriba e izquierda y pega las esquinas', () => {
+    const { rect, guides } = drawRect({ x: 59.6, y: 40.2 }, { x: 3.4, y: 20.1 }, targets, opts);
+    expect(rect).toEqual({ x: 3, y: 20, w: 57, h: 20 });
+    expect(guides).toEqual(expect.arrayContaining([{ axis: 'x', at: 3 }, { axis: 'x', at: 60 }]));
+  });
+
+  it('nunca baja del tamaño mínimo', () => {
+    expect(drawRect({ x: 10, y: 10 }, { x: 10, y: 10 }, targets, opts).rect).toEqual({ x: 10, y: 10, w: 1, h: 1 });
   });
 });
