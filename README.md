@@ -6,7 +6,11 @@ Genera cartas a partir de un CSV y de plantillas (una por `tipo`). Exporta PNG/J
 npm install
 npm run dev          # http://localhost:5173  (…/#ejemplo abre el ejemplo)
 npm run build        # versión estática en dist/
+npm test             # pruebas del núcleo (Vitest)
+npm run check        # tipos
 ```
+
+Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; hay que activar **Settings → Pages → Source: GitHub Actions** una vez). `dist/` funciona en cualquier hosting estático con HTTPS.
 
 ## Flujo de trabajo
 
