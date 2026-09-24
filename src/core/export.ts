@@ -1,13 +1,26 @@
-import JSZip from 'jszip';
+import { downloadZip } from 'client-zip';
+import type { FileSource } from './assets';
 import { BLEED_MM, cardPixels, cardSizeFor, type CardPixels } from './card';
 import type { ExportPlan } from './deck';
 import { withDpi } from './dpi';
 import type { LoadedProject } from './project';
 import { renderCard, templateFor } from './render';
 import { normalizeKey } from './text';
-import type { CardRow, Mm, Project } from './types';
+import type { CardRow, ExportSettings, Mm, Project } from './types';
 
-export type ExportFormat = 'png' | 'jpg';
+export type ExportFormat = ExportSettings['format'];
+
+export const DEFAULT_EXPORT: ExportSettings = { dpi: 300, format: 'png', quality: 95 };
+
+/** Ajustes del proyecto con valores por defecto y dentro de rango. */
+export function exportSettings(project: Project): ExportSettings {
+  const e = { ...DEFAULT_EXPORT, ...project.export };
+  return {
+    dpi: Math.min(1200, Math.max(72, Math.round(Number(e.dpi) || DEFAULT_EXPORT.dpi))),
+    format: e.format === 'jpg' ? 'jpg' : 'png',
+    quality: Math.min(100, Math.max(50, Math.round(Number(e.quality) || DEFAULT_EXPORT.quality))),
+  };
+}
 
 export interface ExportOptions {
   /** Entero: JPG solo guarda ppp enteros. */
@@ -128,24 +141,91 @@ export function buildManifest(
   };
 }
 
-/** Cada imagen se genera una sola vez aunque varias cartas compartan trasera. */
-export async function exportZip(
+export interface ExportFile {
+  name: string;
+  input: Blob | string;
+}
+
+/**
+ * Genera los archivos de la exportación de uno en uno, bajo demanda: quien los consume
+ * (zip en streaming o carpeta) marca el ritmo y solo hay una imagen en memoria a la vez.
+ * Cada imagen se genera una sola vez aunque varias cartas compartan trasera.
+ */
+export async function* exportFiles(
   plan: ExportPlan,
   lp: LoadedProject,
   opts: ExportOptions,
-  onProgress: (done: number, total: number) => void,
-): Promise<Blob> {
+  onProgress?: (done: number, total: number) => void,
+  signal?: AbortSignal,
+): AsyncGenerator<ExportFile> {
   const indices = [...plan.fronts.map((f) => f.index), ...plan.backs];
   const names = fileNames(indices, lp.rows, opts);
-  const zip = new JSZip();
   let done = 0;
   for (const [i, name] of names) {
-    zip.file(name, await cardBlob(lp.rows[i], lp, opts));
-    onProgress(++done, names.size);
+    signal?.throwIfAborted();
+    const input = await cardBlob(lp.rows[i], lp, opts);
+    signal?.throwIfAborted();
+    yield { name, input };
+    onProgress?.(++done, names.size);
   }
   const manifest = buildManifest(plan, lp.rows, lp.project, opts, names, new Date().toISOString());
-  zip.file(MANIFEST_FILE, JSON.stringify(manifest, null, 2) + '\n');
-  return zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  yield { name: MANIFEST_FILE, input: JSON.stringify(manifest, null, 2) + '\n' };
+}
+
+/**
+ * Zip en streaming. Con `showSaveFilePicker` (Chrome/Edge) se escribe directamente en disco;
+ * si no, el navegador guarda el blob (en disco si es grande) y se descarga.
+ * Devuelve false si el usuario cancela el diálogo de guardar.
+ */
+export async function saveZip(files: AsyncIterable<ExportFile>, fileName: string, signal?: AbortSignal): Promise<boolean> {
+  if (window.showSaveFilePicker) {
+    let handle: FileSystemFileHandle;
+    try {
+      handle = await window.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{ description: 'Archivo zip', accept: { 'application/zip': ['.zip'] } }],
+      });
+    } catch (e) {
+      if ((e as DOMException).name === 'AbortError') return false;
+      throw e;
+    }
+    const writable = await handle.createWritable();
+    await downloadZip(files).body!.pipeTo(writable, { signal });
+    return true;
+  }
+  const blob = await downloadZip(files).blob();
+  signal?.throwIfAborted();
+  downloadBlob(blob, fileName);
+  return true;
+}
+
+/** Solo nombres simples: nunca se borra nada fuera de la carpeta de exportación. */
+const PLAIN_NAME = /^[\w.-]+$/;
+
+/**
+ * Escribe la exportación en `dir` dentro de la carpeta del proyecto. La carpeta refleja
+ * la última exportación: se borran los archivos que declaraba el manifiesto anterior y ya
+ * no se generan. Nada que no figure en ese manifiesto se toca.
+ */
+export async function saveToFolder(files: AsyncIterable<ExportFile>, source: FileSource, dir: string, signal?: AbortSignal) {
+  if (!source.write) throw new Error('Esta carpeta no admite escritura.');
+  const previous = new Set<string>();
+  const old = await source.read(`${dir}/${MANIFEST_FILE}`);
+  if (old) {
+    try {
+      const m = JSON.parse(await old.text()) as Partial<Manifest>;
+      for (const name of Object.keys(m.images ?? {})) if (PLAIN_NAME.test(name)) previous.add(name);
+    } catch {
+      // manifiesto ilegible: no se borra nada
+    }
+  }
+  const written = new Set<string>();
+  for await (const f of files) {
+    signal?.throwIfAborted();
+    await source.write(`${dir}/${f.name}`, f.input);
+    written.add(f.name);
+  }
+  for (const name of previous) if (!written.has(name)) await source.remove?.(`${dir}/${name}`);
 }
 
 export function downloadBlob(blob: Blob, name: string) {

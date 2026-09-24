@@ -115,6 +115,14 @@ export interface FontFile {
   style?: string;
 }
 
+/** Ajustes de exportación guardados con el proyecto. */
+export interface ExportSettings {
+  dpi: number;
+  format: 'png' | 'jpg';
+  /** Calidad JPG en %, de 50 a 100. */
+  quality: number;
+}
+
 export interface Project {
   name: string;
   csv: string;
@@ -123,6 +131,7 @@ export interface Project {
   fonts: FontFile[];
   attributes: Record<string, AttributeDef>;
   templates: Record<string, Template>;
+  export?: Partial<ExportSettings>;
 }
 
 /** Una fila del CSV, con las cabeceras normalizadas (ver `normalizeKey`). */

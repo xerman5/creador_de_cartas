@@ -88,7 +88,14 @@ Coordenadas en mm desde la esquina del **corte** (el sangrado queda en negativo)
 
 ## Exportación
 
-Exporta las cartas visibles (respeta el filtro) en PNG o JPG, a los ppp elegidos, siempre con sangrado:
+Exporta las cartas visibles (respeta el filtro) en PNG o JPG, a los ppp elegidos, siempre con sangrado. Formato, ppp y calidad JPG se guardan en `proyecto.json` (`"export": { "dpi": 300, "format": "png", "quality": 95 }`).
+
+Destinos:
+
+- **Descargar .zip**: el zip se genera en streaming, carta a carta; la memoria no crece con el tamaño del mazo. En Chrome/Edge se elige dónde guardarlo y se escribe directamente en disco.
+- **Carpeta del proyecto** (Chrome/Edge con la carpeta abierta): escribe en `export/` (`export/<idioma>/` si hay varios idiomas). La carpeta refleja la última exportación: se borran los archivos que declaraba el `manifest.json` anterior y ya no se generan; nada más se toca.
+
+Se puede cancelar en cualquier momento.
 
 - Cada imagen se genera **una sola vez**. Las cartas que otras usan como trasera (y no tienen trasera propia) se exportan como traseras, no como cartas, aunque el filtro no las incluya.
 - Nombre de archivo: el `id` (más `_es`, `_en`… si el CSV tiene varios idiomas). Si dos ids dan el mismo nombre, el segundo lleva `-2`.
@@ -156,5 +163,4 @@ src/lib/      componentes Svelte
 ## Próximos pasos
 
 - Cerrar la convención de nombres y el manifiesto con el programa de PDF.
-- Exportar en segundo plano (Web Worker + OffscreenCanvas) y escribir el lote por partes o directamente en la carpeta del proyecto, para mazos grandes.
 - Carga diferida de miniaturas para mazos grandes.

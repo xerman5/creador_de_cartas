@@ -50,6 +50,7 @@ function normalizeProject(raw: any, errors: string[]): Project {
     fonts: raw.fonts ?? [],
     attributes,
     templates,
+    ...(raw.export ? { export: raw.export } : {}),
   };
 }
 

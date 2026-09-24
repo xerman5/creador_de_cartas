@@ -11,7 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "jszip": "^3.10.2",
+    "client-zip": "^2.5.1",
     "papaparse": "^5.7.0"
   },
   "devDependencies": {
