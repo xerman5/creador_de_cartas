@@ -112,7 +112,8 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
 
   // Catálogo de atributos con iconos provisionales.
   const attributes: Record<string, AttributeDef> = {};
-  a.attributes.forEach((at, i) => {
+  // Solo si alguna carta los muestra: los atributos de ejemplo no deben ensuciar el proyecto.
+  if (any('stats')) a.attributes.forEach((at, i) => {
     const key = attrKey(at);
     if (!key || attributes[key]) return;
     const icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
