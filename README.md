@@ -121,6 +121,7 @@ Se puede cancelar en cualquier momento.
 
 - **Sangrado fijo de 3 mm** por lado, siempre incluido al exportar. Si la imprenta pide menos, se recorta después.
 - **Zona peligrosa**: la franja entre el corte y el margen de seguridad (`safe`, 3 mm por defecto). Los textos y atributos que entran en ella generan un aviso y se marcan en rojo en el editor; las imágenes no cuentan (fondos y marcos llegan al borde a propósito).
+- **Color sRGB declarado**: el canvas dibuja en sRGB y cada archivo lo dice: PNG con `sRGB` + `gAMA` + `cHRM`; JPG con perfil ICC sRGB (el que incrusta el navegador o, si no pone ninguno, uno compacto CC0). Así el programa de maquetación no tiene que adivinarlo.
 - **Píxeles exactos**: `ancho = round(ancho_mm · ppp / 25,4) + 2 · round(3 · ppp / 25,4)`. El corte cae en un píxel entero y el sangrado es idéntico en los cuatro lados (póker a 300 ppp: 744 × 1039 + 35 px por lado = 814 × 1109 px).
 
 ### Zonas
@@ -151,7 +152,7 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip
-  dpi.ts          escribe los ppp en PNG/JPG
+  metadata.ts     ppp y perfil sRGB en PNG/JPG
   assets.ts       lectura de archivos (carpeta, lista, URL) y caché de imágenes
 src/lib/      componentes Svelte
   workspace.svelte.ts   estado: abrir, editar (inmutable), deshacer, guardar

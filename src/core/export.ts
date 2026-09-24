@@ -2,7 +2,7 @@ import { downloadZip } from 'client-zip';
 import type { FileSource } from './assets';
 import { BLEED_MM, cardPixels, cardSizeFor, type CardPixels } from './card';
 import type { ExportPlan } from './deck';
-import { withDpi } from './dpi';
+import { withMetadata } from './metadata';
 import type { LoadedProject } from './project';
 import { renderCard, templateFor } from './render';
 import { normalizeKey } from './text';
@@ -41,7 +41,7 @@ export async function cardBlob(row: CardRow, lp: LoadedProject, opts: ExportOpti
   const type = opts.format === 'png' ? 'image/png' : 'image/jpeg';
   const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, type, opts.quality));
   if (!blob) throw new Error('No se pudo generar la imagen.');
-  return withDpi(blob, opts.dpi);
+  return withMetadata(blob, opts.dpi);
 }
 
 export function slug(s: string): string {
