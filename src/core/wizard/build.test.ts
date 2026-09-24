@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MemorySource } from '../assets';
 import { planExport } from '../deck';
 import { hasColumn, loadProject, projectIssues, templateColumns } from '../project';
-import { defaultAnswers, DESIGNS, type WizardAnswers } from './answers';
+import { defaultAnswers, DESIGNS, withDefaults, type WizardAnswers } from './answers';
 import { buildProject, projectFiles } from './build';
 
 /** Un juego con de todo: dos idiomas, tres tipos (uno «igual que» otro), atributos, coste y rareza. */
@@ -81,10 +81,56 @@ describe('buildProject', () => {
   });
 
   it('sin atributos ni coste no hay columna de atributos; la paleta está en el proyecto', async () => {
-    const { lp } = await load(defaultAnswers());
+    const a = defaultAnswers();
+    a.types[0].label = 'Carta';
+    const { lp } = await load(a);
     expect(lp.columns).not.toContain('atributos');
     expect(lp.project.attributes).toEqual({});
     expect(lp.project.colors).toMatchObject({ principal: '#1f3a5f', papel: '#efe6d2' });
     expect(lp.rows).toHaveLength(21);
+  });
+});
+
+describe('datos de cartas y ajuste fino', () => {
+  it('usa lo escrito en cada carta y rellena el resto con ejemplos', async () => {
+    const a = rich({ langs: ['es'] });
+    a.types[0].cards = [
+      { id: 'DRAGON', titulo: 'Dragón', descripcion: 'Vuela.', 'attr:ataque': '7', coste: '4', variante: 'Épica', ilustracion: 'ilustraciones/dragon.png', copias: '2' },
+      { titulo: 'Lobo' },
+    ];
+    const { lp } = await load(a);
+    const [dragon, lobo, tercera] = lp.rows;
+    expect(dragon).toMatchObject({ id: 'DRAGON', titulo: 'Dragón', descripcion: 'Vuela.', rareza: 'Épica', ilustracion: 'ilustraciones/dragon.png', copias: '2' });
+    expect(dragon.atributos).toMatch(/^coste:4 \| ataque:7 \| vida:\d$/);
+    expect(lobo).toMatchObject({ id: 'CRI-002', titulo: 'Lobo', descripcion: 'Escribe aquí el texto de reglas.', ilustracion: '' });
+    expect(tercera.titulo).toBe('Criatura 3');
+  });
+
+  it('el ajuste fino cambia piezas y textos', async () => {
+    const a = rich({ langs: ['es'] });
+    a.fine = {
+      pieces: { 'caja de texto': { fill: 'none', border: true }, cabecera: { fill: 'acento', opacity: 0.5 } },
+      texts: { reglas: { scale: 1.2, color: 'papel' }, titulo: { scale: 9 } },
+    };
+    const { lp } = await load(a);
+    const zones = Object.fromEntries(lp.project.templates.criatura.zones.map((z) => [z.id, z]));
+    expect(zones['caja de texto']).toMatchObject({ stroke: 'acento' });
+    expect((zones['caja de texto'] as { fill?: string }).fill).toBeUndefined();
+    expect(zones.cabecera).toMatchObject({ fill: 'acento', opacity: 0.5 });
+    expect(zones.reglas).toMatchObject({ font: { size: 9, color: 'papel' } });
+    expect((zones.titulo as { font: { size: number } }).font.size).toBe(15.75); // escala limitada a 1,5
+  });
+});
+
+describe('withDefaults', () => {
+  it('completa un borrador antiguo sin romper lo que tenía', () => {
+    const old = { name: 'Viejo', types: [{ label: 'Clan', count: 3 }], adjust: { art: 0.4 } } as never;
+    const a = withDefaults(old);
+    expect(a.name).toBe('Viejo');
+    expect(a.types[0]).toMatchObject({ label: 'Clan', count: 3, elements: [], attributes: [] });
+    expect(a.adjust.art).toBe(0.4);
+    expect(a.adjust.palette.principal).toBe(defaultAnswers().adjust.palette.principal);
+    expect(a.fine).toEqual({ pieces: {}, texts: {} });
+    expect(withDefaults(null)).toEqual(defaultAnswers());
   });
 });

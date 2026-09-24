@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import { layoutZones, artPath } from './designs';
 import { artSvg, backSvg, costSvg, iconSvg, shiftColor } from './art';
-import { attrKey, fileKey, resolvedType, typeKey, type ElementKey, type WizardAnswers } from './answers';
+import { attrKey, fileKey, resolvedType, textKey, typeKey, type CardData, type ElementKey, type FineTune, type WizardAnswers } from './answers';
 import { DEFAULT_SAFE_MM } from '../card';
 import { PROJECT_FILE, serializeProject } from '../project';
 import { normalizeKey } from '../text';
@@ -33,6 +33,11 @@ const COST_KEY = 'coste';
 /** Todos los archivos del proyecto, listos para escribir en una carpeta o en un zip. */
 export function projectFiles(built: BuiltProject): Record<string, string> {
   return { [PROJECT_FILE]: serializeProject(built.project), [built.project.csv]: built.csv, ...built.files };
+}
+
+/** Id por defecto de la carta `k` (desde 1) de cada tipo: «CRI-001». */
+export function cardIds(types: { label: string }[]): ((k: number) => string)[] {
+  return prefixes(types.map((t) => t.label)).map((p) => (k: number) => `${p}-${String(k).padStart(3, '0')}`);
 }
 
 /** Id corto de las cartas de un tipo: «Criatura» → «CRI». Distinto para cada tipo. */
@@ -92,14 +97,42 @@ function backTemplate(answers: WizardAnswers, f: number): Template {
   return { zones };
 }
 
+/** Aplica el ajuste fino (colores, transparencia, bordes, tamaños de letra) por id de zona. */
+export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number): Zone[] {
+  if (!fine) return zones;
+  return zones.map((z) => {
+    if (z.type === 'shape' && fine.pieces[z.id]) {
+      const p = fine.pieces[z.id];
+      const out = { ...z };
+      if (p.fill) out.fill = p.fill === 'none' ? undefined : p.fill;
+      if (p.opacity !== undefined) out.opacity = Math.min(1, Math.max(0, p.opacity));
+      if (p.border === true) {
+        out.stroke ??= 'acento';
+        out.strokeWidth ??= Math.round(0.35 * f * 100) / 100;
+      } else if (p.border === false) out.stroke = undefined;
+      return out;
+    }
+    if (z.type === 'text' && fine.texts[z.id]) {
+      const t = fine.texts[z.id];
+      const scale = Math.min(1.5, Math.max(0.7, t.scale ?? 1));
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      return {
+        ...z,
+        minSize: z.minSize !== undefined ? r2(z.minSize * scale) : undefined,
+        font: { ...z.font, size: r2(z.font.size * scale), ...(t.color ? { color: t.color } : {}) },
+      };
+    }
+    return z;
+  });
+}
+
 /** De las respuestas del asistente a un proyecto completo que ya se puede ver y exportar. */
 export function buildProject(answers: WizardAnswers): BuiltProject {
   const a = answers;
   const size = { width: a.size.width, height: a.size.height, safe: DEFAULT_SAFE_MM };
   const f = Math.min(size.width / 63, size.height / 88);
   const langs = a.langs.length ? a.langs : ['es'];
-  const multi = langs.length > 1;
-  const col = (name: string, lang: string) => (multi ? `${name}-${lang}` : name);
+  const col = (name: string, lang: string) => textKey(name, lang, langs);
   const types = a.types.filter((t) => t.label.trim());
   const variantCol = normalizeKey(a.variant.column || 'rareza');
   const palette = a.adjust.palette;
@@ -135,15 +168,19 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   types.forEach((t, i) => {
     const key = typeKey(t);
     const r = resolved[i];
-    const zones = layoutZones({
-      design: a.design,
-      elements: r.elements,
-      size,
-      adjust: a.adjust,
-      tipo: key,
-      statKeys: r.attributes,
-      variantColumn: variantCol,
-    });
+    const zones = applyFine(
+      layoutZones({
+        design: a.design,
+        elements: r.elements,
+        size,
+        adjust: a.adjust,
+        tipo: key,
+        statKeys: r.attributes,
+        variantColumn: variantCol,
+      }),
+      a.fine,
+      f,
+    );
     const art = zones.find((z) => z.id === 'ilustracion');
     if (art) files[`assets/${artPath(key)}`] = artSvg(art.rect.w, art.rect.h, palette, i * 47, `${t.label} · ilustración provisional`);
     const tpl: Template = { zones };
@@ -194,19 +231,26 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
     const firstStat = r.attributes[0];
     for (let k = 1; k <= n; k++) {
       serial++;
-      const row: Record<string, string> = { id: `${pre[i]}-${String(k).padStart(3, '0')}`, tipo: t.label.trim() };
+      // Lo que el usuario escribió manda; lo vacío se rellena con ejemplos (y queda como pendiente).
+      const data: CardData = t.cards?.[k - 1] ?? {};
+      const own = (key: string) => (data[key] ?? '').trim();
+      const row: Record<string, string> = { id: own('id') || `${pre[i]}-${String(k).padStart(3, '0')}`, tipo: t.label.trim() };
       for (const l of langs) {
         const ph = PLACEHOLDERS[l] ?? PLACEHOLDERS.es;
-        row[col('titulo', l)] = `${t.label.trim()} ${k}`;
-        if (r.elements.has('subtitle')) row[col('subtipo', l)] = t.label.trim();
-        if (r.elements.has('rules')) row[col('descripcion', l)] = firstStat && k === 1 ? `${ph.rules} {${firstStat}}` : ph.rules;
-        if (r.elements.has('flavor')) row[col('sabor', l)] = ph.flavor;
+        row[col('titulo', l)] = own(col('titulo', l)) || `${t.label.trim()} ${k}`;
+        if (r.elements.has('subtitle')) row[col('subtipo', l)] = own(col('subtipo', l)) || t.label.trim();
+        if (r.elements.has('rules'))
+          row[col('descripcion', l)] = own(col('descripcion', l)) || (firstStat && k === 1 ? `${ph.rules} {${firstStat}}` : ph.rules);
+        if (r.elements.has('flavor')) row[col('sabor', l)] = own(col('sabor', l)) || ph.flavor;
       }
       const attrs: string[] = [];
-      if (r.elements.has('cost')) attrs.push(`${COST_KEY}:${((k - 1) % 5) + 1}`);
-      if (r.elements.has('stats')) r.attributes.forEach((key, j) => attrs.push(`${key}:${((k + j * 2) % 6) + 1}`));
+      if (r.elements.has('cost')) attrs.push(`${COST_KEY}:${own('coste') || ((k - 1) % 5) + 1}`);
+      if (r.elements.has('stats')) r.attributes.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
       if (attrs.length) row.atributos = attrs.join(' | ');
-      if (r.elements.has('variant') && a.variant.values.length) row[variantCol] = a.variant.values[(k - 1) % a.variant.values.length].name;
+      if (r.elements.has('variant') && a.variant.values.length)
+        row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;
+      if (r.elements.has('art') && own('ilustracion')) row.ilustracion = own('ilustracion');
+      if (own('copias')) row.copias = own('copias');
       if (r.elements.has('number')) row.numero = `${String(serial).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
       rows.push(row);
     }

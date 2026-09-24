@@ -14,18 +14,23 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 
 ## Asistente
 
-«Nuevo…» abre un asistente que pregunta cómo es el juego y deja el proyecto listo para rellenar:
+«Nuevo…» abre un asistente que acompaña paso a paso hasta tener el mazo hecho:
 
 1. **Tu juego**: nombre, tamaño de carta e idiomas.
 2. **Tipos de carta** y cuántas de cada uno.
-3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos, rareza o facción, número de colección. Un tipo puede ser «igual que» otro.
-4. **Atributos y rareza**: nombre y color de cada uno, cuáles lleva cada tipo, valores de la rareza.
+3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos, rareza/clan/facción, número de colección. Un tipo puede ser «igual que» otro.
+4. **Atributos y rareza**: nombre y color de cada atributo (números con icono), cuáles lleva cada tipo (tabla de casillas), valores de la rareza, clan o facción.
 5. **Diseño**: cuatro diseños base (clásico, ilustración completa, retrato, texto) dibujados con tu contenido.
 6. **Ajustes**: paleta, tipografía, tamaño de la ilustración, lado de los atributos, esquina del coste, esquinas redondeadas.
-7. **Traseras**: una para todas, una por tipo o ninguna.
-8. **Crear**: en una carpeta (Chrome/Edge), como .zip o de prueba sin guardar.
+7. **Ajuste fino** (opcional): color o transparencia, opacidad y borde de cada pieza (fondo, bandas, caja de texto, placa…), color y tamaño de cada texto, alto de la caja de texto. Se pueden señalar las piezas sobre la carta.
+8. **Traseras**: una para todas, una por tipo o ninguna.
+9. **Cartas**: la tabla de cada tipo, una fila por carta, con la carta seleccionada dibujada al lado. Se puede **descargar un CSV para rellenar** (una columna por atributo, «;» para Excel) e **importar un CSV** (ese mismo, el del proyecto o uno propio: reconoce `nombre`, `texto`, `imagen`, `clan`…; avisa de tipos y columnas que no encajan).
+10. **Imágenes**: elegir una carpeta y emparejarlas solas: (1) el archivo se llama como el id de la carta (`CRI-001.png`); (2) como su título (`guardian-de-ceniza.jpg`, sin importar mayúsculas, tildes ni espacios); (3) opcional: las demás por orden alfabético dentro de una subcarpeta con el nombre del tipo (`criatura/01.png`). Cada carta se puede corregir en la tabla. Las imágenes se copian a `assets/ilustraciones/`.
+11. **Crear**: en una carpeta (Chrome/Edge), como .zip o de prueba sin guardar.
 
-El resultado es un proyecto normal: plantillas editables, CSV con filas de ejemplo en cada idioma y las columnas exactas, e imágenes provisionales en `assets/provisional/`. La galería muestra un panel **Pendiente** con lo que falta (ilustraciones, iconos, textos de relleno). El borrador del asistente se guarda en el navegador.
+**Guardar progreso** descarga un `.asistente.json` con todas las respuestas y la tabla, para seguir otro día o en otro ordenador con **Cargar progreso…** (las imágenes no van en el archivo: al volver, se elige de nuevo la carpeta). Además, el borrador se guarda solo en el navegador.
+
+Lo que no se rellena usa textos de ejemplo e imágenes provisionales, y el panel **Pendiente** de la galería dice qué falta.
 
 Los diseños se prueban con todas las combinaciones de elementos, tamaños y ajustes: ningún texto en la zona peligrosa, sin solapes y con sitio mínimo para textos, iconos e ilustración.
 
@@ -187,7 +192,7 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
   pending.ts      lo que falta para terminar la baraja
-  wizard/         asistente: respuestas, diseños base, imágenes provisionales, generación del proyecto
+  wizard/         asistente: respuestas, diseños base, ajuste fino, tabla CSV, emparejado de imágenes, generación del proyecto
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip
   metadata.ts     ppp y perfil sRGB en PNG/JPG
   assets.ts       lectura de archivos (carpeta, lista, URL) y caché de imágenes

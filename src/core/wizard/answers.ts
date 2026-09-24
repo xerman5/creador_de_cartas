@@ -9,10 +9,17 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
   { key: 'rules', label: 'Texto de reglas', hint: 'Lo que hace la carta. Admite iconos: {ataque}.' },
   { key: 'flavor', label: 'Texto de ambientación', hint: 'Una frase en cursiva que no afecta al juego.' },
   { key: 'cost', label: 'Coste', hint: 'Un número en una esquina: lo que cuesta jugarla.' },
-  { key: 'stats', label: 'Atributos', hint: 'Valores con icono: ataque, vida, velocidad…' },
-  { key: 'variant', label: 'Rareza o facción', hint: 'Una marca de color que cambia según la carta.' },
+  { key: 'stats', label: 'Atributos', hint: 'Números con icono que cambian en cada carta: Ataque 3, Vida 5…' },
+  { key: 'variant', label: 'Rareza, clan o facción', hint: 'Una categoría con su color: común/rara, un clan, una facción…' },
   { key: 'number', label: 'Número de colección', hint: '«012/120» en el pie de la carta.' },
 ];
+
+/**
+ * Lo que el usuario escribe de una carta. Claves: las columnas de texto del CSV (`titulo`,
+ * o `titulo-es`, `titulo-en`… con varios idiomas), `attr:<clave>` por atributo, `coste`,
+ * `variante`, `ilustracion`, `copias` e `id`. Lo que falta se rellena con textos de ejemplo.
+ */
+export type CardData = Record<string, string>;
 
 export interface TypeAnswer {
   label: string;
@@ -22,6 +29,8 @@ export interface TypeAnswer {
   attributes: string[];
   /** Mismo contenido que otro tipo (su etiqueta): comparte elementos y atributos. */
   sameAs?: string;
+  /** Datos de sus cartas, en orden; puede tener menos filas que `count`. */
+  cards?: CardData[];
 }
 
 export interface AttrAnswer {
@@ -75,6 +84,28 @@ export interface Adjust {
   palette: Palette;
 }
 
+/** Colores de la paleta para piezas y textos; `none` = transparente. */
+export type PieceColor = 'principal' | 'acento' | 'papel' | 'tinta' | 'none';
+
+export interface PieceStyle {
+  fill?: PieceColor;
+  /** 0–1. */
+  opacity?: number;
+  border?: boolean;
+}
+
+export interface TextStyle {
+  /** Multiplica el tamaño de letra (0,7–1,5). */
+  scale?: number;
+  color?: Exclude<PieceColor, 'none'>;
+}
+
+/** Ajuste fino por pieza del diseño (por id de zona): se aplica a todos los tipos. */
+export interface FineTune {
+  pieces: Record<string, PieceStyle>;
+  texts: Record<string, TextStyle>;
+}
+
 export interface WizardAnswers {
   name: string;
   langs: string[];
@@ -86,6 +117,7 @@ export interface WizardAnswers {
   design: DesignId;
   adjust: Adjust;
   backs: 'common' | 'per-type' | 'none';
+  fine: FineTune;
 }
 
 export function defaultAnswers(): WizardAnswers {
@@ -93,7 +125,7 @@ export function defaultAnswers(): WizardAnswers {
     name: 'Mi juego',
     langs: ['es'],
     size: { width: 63, height: 88 },
-    types: [{ label: 'Carta', count: 20, elements: ['art', 'rules', 'flavor', 'number'], attributes: [] }],
+    types: [{ label: '', count: 20, elements: ['art', 'rules', 'flavor', 'number'], attributes: [] }],
     attributes: [
       { label: 'Ataque', color: '#d9534f' },
       { label: 'Vida', color: '#4caf50' },
@@ -110,7 +142,32 @@ export function defaultAnswers(): WizardAnswers {
     design: 'clasico',
     adjust: { art: 0.55, attrSide: 'left', costCorner: 'right', rounded: true, fonts: 'clasica', palette: { ...PALETTES.noche.colors } },
     backs: 'common',
+    fine: { pieces: {}, texts: {} },
   };
+}
+
+/** Respuestas de un borrador o de un archivo de progreso, completadas con lo que falte. */
+export function withDefaults(raw: Partial<WizardAnswers> | null | undefined): WizardAnswers {
+  const d = defaultAnswers();
+  if (!raw || typeof raw !== 'object') return d;
+  return {
+    ...d,
+    ...raw,
+    size: { ...d.size, ...raw.size },
+    langs: Array.isArray(raw.langs) && raw.langs.length ? raw.langs : d.langs,
+    types: Array.isArray(raw.types)
+      ? raw.types.map((t: Partial<TypeAnswer>) => ({ label: '', count: 1, elements: [], attributes: [], ...t }))
+      : d.types,
+    attributes: Array.isArray(raw.attributes) ? raw.attributes : d.attributes,
+    variant: { ...d.variant, ...raw.variant },
+    adjust: { ...d.adjust, ...raw.adjust, palette: { ...d.adjust.palette, ...raw.adjust?.palette } },
+    fine: { pieces: { ...raw.fine?.pieces }, texts: { ...raw.fine?.texts } },
+  };
+}
+
+/** Clave de un campo de texto: `titulo` con un idioma, `titulo-en` con varios. */
+export function textKey(field: string, lang: string, langs: string[]): string {
+  return langs.length > 1 ? `${field}-${lang}` : field;
 }
 
 export const typeKey = (t: Pick<TypeAnswer, 'label'>) => normalizeKey(t.label);
