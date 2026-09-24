@@ -112,7 +112,7 @@ class Layout {
     });
   }
 
-  private subtitle(r: Rect, color: string, align: TextZone['align'] = 'left') {
+  private subtitle(r: Rect, color: string, align: TextZone['align'] = 'center') {
     this.zones.push({
       id: 'linea de tipo',
       type: 'text',
@@ -126,7 +126,7 @@ class Layout {
     });
   }
 
-  private rules(r: Rect, color: string, pt = 7.5, align: TextZone['align'] = 'left') {
+  private rules(r: Rect, color: string, pt = 7.5, align: TextZone['align'] = 'center') {
     this.zones.push({
       id: 'reglas',
       type: 'text',

@@ -110,14 +110,15 @@ describe('datos de cartas y ajuste fino', () => {
     const a = rich({ langs: ['es'] });
     a.fine = {
       pieces: { 'caja de texto': { fill: 'none', border: true }, cabecera: { fill: 'acento', opacity: 0.5 } },
-      texts: { reglas: { scale: 1.2, color: 'papel' }, titulo: { scale: 9 } },
+      texts: { reglas: { scale: 1.2, color: 'papel', align: 'justify' }, titulo: { scale: 9 } },
     };
     const { lp } = await load(a);
     const zones = Object.fromEntries(lp.project.templates.criatura.zones.map((z) => [z.id, z]));
     expect(zones['caja de texto']).toMatchObject({ stroke: 'acento' });
     expect((zones['caja de texto'] as { fill?: string }).fill).toBeUndefined();
     expect(zones.cabecera).toMatchObject({ fill: 'acento', opacity: 0.5 });
-    expect(zones.reglas).toMatchObject({ font: { size: 9, color: 'papel' } });
+    expect(zones.reglas).toMatchObject({ align: 'justify', font: { size: 9, color: 'papel' } });
+    expect(zones.titulo).toMatchObject({ align: 'center' });
     expect((zones.titulo as { font: { size: number } }).font.size).toBe(15.75); // escala limitada a 1,5
   });
 });

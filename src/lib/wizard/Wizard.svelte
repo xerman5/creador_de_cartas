@@ -209,6 +209,13 @@
     for (const t of answers.types) t.attributes = t.attributes.map((k) => (k === old ? key : k));
   }
 
+  function moveAttr(i: number, dir: 1 | -1) {
+    const j = i + dir;
+    if (j < 0 || j >= answers.attributes.length) return;
+    const list = answers.attributes;
+    [list[i], list[j]] = [list[j], list[i]];
+  }
+
   function removeAttr(i: number) {
     const key = attrKey(answers.attributes[i]);
     answers.attributes.splice(i, 1);
@@ -640,9 +647,14 @@
             <div class="row attr">
               <input type="color" bind:value={at.color} />
               <input type="text" value={at.label} oninput={(e) => renameAttr(i, e.currentTarget.value)} placeholder="Nombre" />
+              <button class="ghost small" onclick={() => moveAttr(i, -1)} disabled={i === 0} title="Subir" aria-label="Subir {at.label}">↑</button>
+              <button class="ghost small" onclick={() => moveAttr(i, 1)} disabled={i === answers.attributes.length - 1} title="Bajar" aria-label="Bajar {at.label}">↓</button>
               <button class="ghost small" onclick={() => removeAttr(i)} title="Quitar">✕</button>
             </div>
           {/each}
+          {#if answers.attributes.length > 1}
+            <p class="hint">El orden de esta lista es el orden en que aparecen en la carta.</p>
+          {/if}
           <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length] })}>
             ＋ Atributo
           </button>
@@ -871,7 +883,19 @@
                     {/each}
                   </div>
                 </td>
-                <td colspan="2">
+                <td>
+                  <select
+                    value={cur.align ?? (z.type === 'text' ? (z.align ?? 'left') : 'left')}
+                    onchange={(e) => (text(z.id).align = e.currentTarget.value as never)}
+                    aria-label="Alineación de {TEXT_LABELS[z.id]}"
+                  >
+                    <option value="left">Izquierda</option>
+                    <option value="center">Centro</option>
+                    <option value="right">Derecha</option>
+                    <option value="justify">Justificado</option>
+                  </select>
+                </td>
+                <td>
                   <label class="inline" title="Tamaño de letra">
                     <input
                       type="range"
@@ -1264,6 +1288,9 @@
   }
   .attr input[type='text'] {
     width: 220px;
+  }
+  .attr button:disabled {
+    visibility: hidden;
   }
   .types {
     border-collapse: collapse;

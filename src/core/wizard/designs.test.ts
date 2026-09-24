@@ -104,3 +104,20 @@ describe('layoutZones: todas las combinaciones', () => {
     }
   });
 });
+
+describe('alineación por defecto', () => {
+  it('todos los textos de contenido van centrados', () => {
+    for (const design of DESIGNS.map((d) => d.id)) {
+      const zones = layoutZones({
+        design,
+        elements: new Set(ALL),
+        size: SIZES[0],
+        adjust: defaultAnswers().adjust,
+        tipo: 't',
+        statKeys: ['vida'],
+        variantColumn: 'rareza',
+      });
+      for (const z of zones) if (z.type === 'text' && z.id !== 'numero') expect(z.align, `${design}/${z.id}`).toBe('center');
+    }
+  });
+});

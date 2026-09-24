@@ -30,6 +30,12 @@ export interface BuiltProject {
 
 const COST_KEY = 'coste';
 
+/** Forma del icono provisional: fija para cada nombre, para que reordenar no la cambie. */
+const KNOWN_SHAPES: Record<string, number> = { ataque: 0, fuerza: 0, dano: 0, vida: 2, salud: 2, defensa: 3, escudo: 3, armadura: 3, magia: 4, poder: 4, velocidad: 1 };
+function shapeIndex(key: string): number {
+  return KNOWN_SHAPES[key] ?? [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 8;
+}
+
 /** Todos los archivos del proyecto, listos para escribir en una carpeta o en un zip. */
 export function projectFiles(built: BuiltProject): Record<string, string> {
   return { [PROJECT_FILE]: serializeProject(built.project), [built.project.csv]: built.csv, ...built.files };
@@ -120,6 +126,7 @@ export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number):
         ...z,
         minSize: z.minSize !== undefined ? r2(z.minSize * scale) : undefined,
         font: { ...z.font, size: r2(z.font.size * scale), ...(t.color ? { color: t.color } : {}) },
+        ...(t.align ? { align: t.align } : {}),
       };
     }
     return z;
@@ -146,11 +153,11 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   // Catálogo de atributos con iconos provisionales.
   const attributes: Record<string, AttributeDef> = {};
   // Solo si alguna carta los muestra: los atributos de ejemplo no deben ensuciar el proyecto.
-  if (any('stats')) a.attributes.forEach((at, i) => {
+  if (any('stats')) a.attributes.forEach((at) => {
     const key = attrKey(at);
     if (!key || attributes[key]) return;
     const icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
-    files[`assets/${icon}`] = iconSvg(i, at.color, palette.tinta);
+    files[`assets/${icon}`] = iconSvg(shapeIndex(key), at.color, palette.tinta);
     attributes[key] = { icon, label: at.label.trim() };
   });
   if (usesCost && !attributes[COST_KEY]) {

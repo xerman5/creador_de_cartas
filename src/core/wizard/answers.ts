@@ -98,6 +98,7 @@ export interface TextStyle {
   /** Multiplica el tamaño de letra (0,7–1,5). */
   scale?: number;
   color?: Exclude<PieceColor, 'none'>;
+  align?: 'left' | 'center' | 'right' | 'justify';
 }
 
 /** Ajuste fino por pieza del diseño (por id de zona): se aplica a todos los tipos. */
@@ -190,8 +191,9 @@ export function resolvedType(
     if (!next) break;
     cur = next;
   }
-  const known = new Set(answers.attributes.map(attrKey));
-  const attributes = cur.attributes.map(normalizeKey).filter((k) => known.has(k));
+  // El orden de dibujo es el de la lista de atributos del juego, no el orden en que se marcaron.
+  const chosen = new Set(cur.attributes.map(normalizeKey));
+  const attributes = answers.attributes.map(attrKey).filter((k) => k && chosen.has(k));
   const declared = new Set(cur.elements);
   const elements = new Set(cur.elements);
   if (!attributes.length) elements.delete('stats');
