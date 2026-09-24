@@ -1,6 +1,7 @@
 <script lang="ts">
   import { BLEED_MM } from '../core/card';
-  import { downloadBlob, exportZip, slug, type ExportFormat } from '../core/export';
+  import { planExport } from '../core/deck';
+  import { downloadBlob, exportZip, slug, type ExportFormat, type ExportOptions } from '../core/export';
   import { projectIssues } from '../core/project';
   import type { RenderOptions } from '../core/render';
   import { normalizeKey } from '../core/text';
@@ -24,6 +25,7 @@
   let selected = $state<number | null>(null);
   let exportFormat = $state<ExportFormat>('png');
   let exportDpi = $state(300);
+  let exportQuality = $state(95);
   let progress = $state('');
   let warnings = $state<Record<number, string[]>>({});
 
@@ -51,10 +53,22 @@
     return [...map];
   });
 
+  const exportOpts = $derived<ExportOptions>({
+    dpi: Math.max(72, Math.round(exportDpi || 300)),
+    lang: ws.lang,
+    format: exportFormat,
+    quality: Math.min(100, Math.max(50, exportQuality || 95)) / 100,
+    langSuffix: lp.langs.length > 1,
+  });
+  const plan = $derived(planExport(lp.rows, visible.map((e) => e.index), lp.project));
+  const totalCopies = $derived(plan.fronts.reduce((s, f) => s + f.copies, 0));
+  const imageCount = $derived(plan.fronts.length + plan.backs.length);
+
   const issues = $derived([...lp.errors, ...projectIssues(lp)]);
-  const allWarnings = $derived(
-    Object.entries(warnings).flatMap(([i, ws]) => ws.map((w) => ({ index: +i, id: lp.rows[+i]?.id ?? '', w }))),
-  );
+  const allWarnings = $derived([
+    ...plan.warnings.map((w) => ({ index: w.index, id: lp.rows[w.index]?.id ?? '', w: w.message })),
+    ...Object.entries(warnings).flatMap(([i, ws]) => ws.map((w) => ({ index: +i, id: lp.rows[+i]?.id ?? '', w }))),
+  ]);
 
   // Si cambian las filas (recarga), los avisos antiguos ya no corresponden.
   $effect(() => {
@@ -64,11 +78,9 @@
 
   async function exportVisible() {
     if (progress) return;
-    const entries = visible;
-    progress = `0 / ${entries.length}`;
+    progress = `0 / ${imageCount}`;
     try {
-      const opts = { dpi: exportDpi, lang: ws.lang, format: exportFormat, langSuffix: lp.langs.length > 1 };
-      const zip = await exportZip(entries, lp, opts, (n) => (progress = `${n} / ${entries.length}`));
+      const zip = await exportZip(plan, lp, exportOpts, (n, total) => (progress = `${n} / ${total}`));
       const suffix = [tipoFilter, ws.lang].filter(Boolean).map(slug).join('_');
       downloadBlob(zip, `${slug(lp.project.name)}${suffix ? `_${suffix}` : ''}.zip`);
     } catch (e) {
@@ -96,11 +108,18 @@
           <option value="png">PNG</option>
           <option value="jpg">JPG</option>
         </select>
-        <label class="inline"><input type="number" min="72" max="1200" bind:value={exportDpi} /> ppp</label>
+        <label class="inline"><input type="number" min="72" max="1200" step="1" bind:value={exportDpi} /> ppp</label>
+        {#if exportFormat === 'jpg'}
+          <label class="inline" title="Calidad JPG"><input type="number" min="50" max="100" step="1" bind:value={exportQuality} /> %</label>
+        {/if}
       </div>
-      <button class="primary" onclick={exportVisible} disabled={!!progress || !visible.length}>
-        {progress ? `Exportando ${progress}` : `Exportar ${visible.length} cartas (.zip)`}
+      <button class="primary" onclick={exportVisible} disabled={!!progress || !imageCount}>
+        {progress ? `Exportando ${progress}` : `Exportar ${plan.fronts.length} cartas + ${plan.backs.length} traseras`}
       </button>
+      <p class="muted small">
+        {totalCopies} copias en total · .zip con {imageCount} imágenes y <code>manifest.json</code><br />
+        Sangrado de 3 mm incluido
+      </p>
     </section>
 
     <section>
@@ -166,7 +185,7 @@
     {lp}
     index={selected}
     opts={previewOpts}
-    {exportDpi}
+    {exportOpts}
     onclose={() => (selected = null)}
     onselect={(i) => (selected = i)}
   />
@@ -225,6 +244,13 @@
   .seg button.active {
     background: var(--accent);
     color: #fff;
+  }
+  .small {
+    font-size: 11px;
+    margin: 0;
+  }
+  .muted {
+    color: var(--muted);
   }
   .warnings {
     list-style: none;

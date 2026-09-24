@@ -17,6 +17,7 @@
 
   "templates": {
     "nave": {
+      "back": "D01",
       "zones": [
         { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/nave.svg", "fit": "cover",
           "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },
@@ -48,6 +49,7 @@
     },
 
     "enemigo": {
+      "back": "D02",
       "zones": [
         { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/enemigo.svg", "fit": "cover",
           "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },

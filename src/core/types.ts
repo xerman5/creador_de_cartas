@@ -98,6 +98,8 @@ export type ZoneType = Zone['type'];
 export interface Template {
   /** Permite que un tipo tenga otro tamaño de carta. */
   size?: Partial<CardSize>;
+  /** `id` de la carta del CSV que hace de trasera por defecto (la columna «trasera» la sustituye). */
+  back?: string;
   zones: Zone[];
 }
 

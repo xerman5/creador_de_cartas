@@ -35,6 +35,7 @@
     return placeholderRow(project, tipo);
   });
 
+  const backCandidates = $derived(lp.rows.filter((r) => r.id?.trim() && normalizeKey(r.tipo ?? '') !== tipo));
   const columns = $derived([...new Set(lp.columns.map((c) => c.replace(/-[a-z]{2}$/, '')))]);
   const counts = $derived.by(() => {
     const m: Record<string, number> = {};
@@ -329,6 +330,23 @@
         Selecciona una zona en la carta o en la lista para editarla.<br /><br />
         Las zonas se dibujan de abajo arriba según la lista: pon el fondo al final y los textos al principio.
       </p>
+      <label class="stack">
+        Trasera por defecto
+        <select
+          value={tpl.back ?? ''}
+          onchange={(e) => {
+            const v = e.currentTarget.value;
+            ws.update((p) => void (p.templates[tipo].back = v || undefined));
+          }}
+        >
+          <option value="">(ninguna)</option>
+          {#each backCandidates as r}<option value={r.id.trim()}>{r.id.trim()} · {r.tipo}</option>{/each}
+          {#if tpl.back && !backCandidates.some((r) => r.id.trim() === tpl.back)}
+            <option value={tpl.back}>{tpl.back} (no existe)</option>
+          {/if}
+        </select>
+      </label>
+      <p class="muted">La columna «trasera» del CSV la sustituye en cada carta; «-» = sin trasera.</p>
       <label class="check">
         <input
           type="checkbox"
@@ -580,6 +598,12 @@
     display: flex;
     gap: 6px;
     align-items: center;
+  }
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
   }
   .f {
     display: flex;
