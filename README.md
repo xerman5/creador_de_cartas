@@ -19,10 +19,10 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 1. **Tu juego**: nombre, tamaño de carta e idiomas.
 2. **Tipos de carta** y cuántas de cada uno.
 3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos, rareza/clan/facción, número de colección. Un tipo puede ser «igual que» otro.
-4. **Atributos y rareza**: nombre y color de cada atributo (números con icono), cuáles lleva cada tipo (tabla de casillas), valores de la rareza, clan o facción.
+4. **Atributos y rareza**: nombre y color de cada atributo (números con icono), su orden en la carta (↑ ↓), cuáles lleva cada tipo (tabla de casillas), valores de la rareza, clan o facción.
 5. **Diseño**: cuatro diseños base (clásico, ilustración completa, retrato, texto) dibujados con tu contenido.
 6. **Ajustes**: paleta, tipografía, tamaño de la ilustración, lado de los atributos, esquina del coste, esquinas redondeadas.
-7. **Ajuste fino** (opcional): color o transparencia, opacidad y borde de cada pieza (fondo, bandas, caja de texto, placa…), color y tamaño de cada texto, alto de la caja de texto. Se pueden señalar las piezas sobre la carta.
+7. **Ajuste fino** (opcional): color o transparencia, opacidad y borde de cada pieza (fondo, bandas, caja de texto, placa…), color, tamaño y alineación de cada texto (por defecto, centrados), alto de la caja de texto. Se pueden señalar las piezas sobre la carta.
 8. **Traseras**: una para todas, una por tipo o ninguna.
 9. **Cartas**: la tabla de cada tipo, una fila por carta, con la carta seleccionada dibujada al lado. Se puede **descargar un CSV para rellenar** (una columna por atributo, «;» para Excel) e **importar un CSV** (ese mismo, el del proyecto o uno propio: reconoce `nombre`, `texto`, `imagen`, `clan`…; avisa de tipos y columnas que no encajan).
 10. **Imágenes**: elegir una carpeta y emparejarlas solas: (1) el archivo se llama como el id de la carta (`CRI-001.png`); (2) como su título (`guardian-de-ceniza.jpg`, sin importar mayúsculas, tildes ni espacios); (3) opcional: las demás por orden alfabético dentro de una subcarpeta con el nombre del tipo (`criatura/01.png`). Cada carta se puede corregir en la tabla. Las imágenes se copian a `assets/ilustraciones/`.
