@@ -209,6 +209,8 @@ const PLAIN_NAME = /^[\w.-]+$/;
  */
 export async function saveToFolder(files: AsyncIterable<ExportFile>, source: FileSource, dir: string, signal?: AbortSignal) {
   if (!source.write) throw new Error('Esta carpeta no admite escritura.');
+  // Antes de nada: el navegador solo concede el permiso inmediatamente después del clic.
+  await source.requestWrite?.();
   const previous = new Set<string>();
   const old = await source.read(`${dir}/${MANIFEST_FILE}`);
   if (old) {

@@ -3,6 +3,7 @@ import type { FileSource } from './assets';
 import { saveToFolder, type ExportFile } from './export';
 
 class MemorySource implements FileSource {
+  requestWrite?: () => Promise<void>;
   label = 'memoria';
   files = new Map<string, Blob | string>();
   async read(path: string) {
@@ -53,5 +54,19 @@ describe('saveToFolder', () => {
     ctrl.abort();
     await expect(saveToFolder(files(['A.png'], ['A.png']), src, 'export', ctrl.signal)).rejects.toThrow();
     expect(src.files.size).toBe(0);
+  });
+});
+
+describe('saveToFolder · permiso', () => {
+  it('pide permiso de escritura antes de generar ninguna imagen', async () => {
+    const order: string[] = [];
+    const src = new MemorySource();
+    src.requestWrite = async () => void order.push('permiso');
+    async function* gen(): AsyncGenerator<ExportFile> {
+      order.push('imagen');
+      yield { name: 'A.png', input: 'a' };
+    }
+    await saveToFolder(gen(), src, 'export');
+    expect(order).toEqual(['permiso', 'imagen']);
   });
 });

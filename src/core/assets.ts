@@ -12,6 +12,8 @@ export interface FileSource {
   list?(dir: string): Promise<string[]>;
   /** Borra un archivo si existe (solo con permiso de escritura). */
   remove?(path: string): Promise<void>;
+  /** Pide permiso de escritura; hay que llamarlo justo tras el clic del usuario. */
+  requestWrite?(): Promise<void>;
 }
 
 function cleanPath(p: string): string {
@@ -50,6 +52,10 @@ export class DirectorySource implements FileSource {
   async stamp(paths: string[]) {
     const files = await Promise.all(paths.map((p) => this.file(p)));
     return files.map((f) => `${f?.lastModified ?? 0}:${f?.size ?? 0}`).join('|');
+  }
+
+  requestWrite() {
+    return this.ensureWritable();
   }
 
   private async ensureWritable() {
