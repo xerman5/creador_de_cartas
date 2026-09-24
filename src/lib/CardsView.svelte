@@ -4,7 +4,7 @@
   import { exportFiles, exportSettings, saveToFolder, saveZip, slug, type ExportOptions } from '../core/export';
   import type { ExportSettings } from '../core/types';
   import { projectIssues } from '../core/project';
-  import type { RenderOptions } from '../core/render';
+  import { renderCard, type RenderOptions } from '../core/render';
   import { normalizeKey } from '../core/text';
   import type { CardRow } from '../core/types';
   import CardDetail from './CardDetail.svelte';
@@ -82,6 +82,32 @@
   $effect(() => {
     lp.rows;
     warnings = {};
+  });
+
+  /** Cartas comprobadas en segundo plano con el proyecto actual (las miniaturas se dibujan solo a la vista). */
+  let checked = $state(0);
+  // Primitivos: cambiar guías o zonas no reinicia la comprobación.
+  const checkDpi = $derived(previewOpts.dpi);
+  const checkLang = $derived(ws.lang);
+  const idle = () => new Promise<void>((r) => ('requestIdleCallback' in window ? requestIdleCallback(() => r(), { timeout: 500 }) : setTimeout(r, 16)));
+
+  $effect(() => {
+    const current = lp;
+    const opts: RenderOptions = { dpi: checkDpi, lang: checkLang, bleed: true };
+    let cancelled = false;
+    checked = 0;
+    (async () => {
+      await idle();
+      for (let i = 0; i < current.rows.length; i++) {
+        if (cancelled) return;
+        const { warnings: w } = await renderCard(current.rows[i], current, opts);
+        if (cancelled) return;
+        warnings[i] = w;
+        checked = i + 1;
+        await idle();
+      }
+    })();
+    return () => (cancelled = true);
   });
 
   async function exportVisible() {
@@ -181,6 +207,9 @@
       </div>
     </section>
 
+    {#if checked < lp.rows.length}
+      <p class="muted small">Comprobando cartas… {checked} / {lp.rows.length}</p>
+    {/if}
     {#if issues.length || allWarnings.length}
       <section>
         <h4 class="warn">Avisos ({issues.length + allWarnings.length})</h4>
@@ -203,7 +232,7 @@
         <div class="grid">
           {#each entries as e (e.index)}
             <button class="thumb" onclick={() => (selected = e.index)}>
-              <CardView row={e.row} {lp} opts={previewOpts} onwarnings={(w) => (warnings[e.index] = w)} />
+              <CardView row={e.row} {lp} opts={previewOpts} lazy onwarnings={(w) => (warnings[e.index] = w)} />
               <span class="cap">
                 {e.row.id || `fila ${e.index + 1}`}
                 {#if warnings[e.index]?.length}<span class="badge">⚠ {warnings[e.index].length}</span>{/if}
