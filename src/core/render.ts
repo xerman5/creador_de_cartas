@@ -1,0 +1,562 @@
+import { parseAttributes } from './attributes';
+import type { LoadedProject } from './project';
+import { getField, normalizeKey } from './text';
+import type {
+  AttributeZone,
+  AttributesZone,
+  CardRow,
+  CardSize,
+  FontSpec,
+  ImageZone,
+  Project,
+  Rect,
+  Template,
+  TextZone,
+  Zone,
+  ZoneType,
+} from './types';
+
+export interface RenderOptions {
+  dpi: number;
+  lang: string;
+  /** Incluir el sangrado en el lienzo. */
+  bleed: boolean;
+  /** Dibujar línea de corte y margen de seguridad. */
+  guides?: boolean;
+  /** Dibujar el contorno de cada zona (para diseñar la anatomía). */
+  zones?: boolean;
+}
+
+export interface RenderResult {
+  canvas: HTMLCanvasElement;
+  warnings: string[];
+}
+
+interface Ctx {
+  ctx: CanvasRenderingContext2D;
+  /** Píxeles por milímetro. */
+  k: number;
+  row: CardRow;
+  lp: LoadedProject;
+  opts: RenderOptions;
+  size: CardSize;
+  warnings: string[];
+}
+
+const ptToMm = (pt: number) => (pt * 25.4) / 72;
+
+export function templateFor(project: Project, row: CardRow): Template | undefined {
+  return project.templates[normalizeKey(row.tipo ?? '')];
+}
+
+export function cardSizeFor(project: Project, tpl?: Template): CardSize {
+  return { ...project.card, ...tpl?.size };
+}
+
+/** Se dibuja siempre en un lienzo nuevo para que renders concurrentes no se pisen. */
+export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOptions): Promise<RenderResult> {
+  const warnings: string[] = [];
+  const tpl = templateFor(lp.project, row);
+  const size = cardSizeFor(lp.project, tpl);
+  const k = opts.dpi / 25.4;
+  const b = opts.bleed ? size.bleed : 0;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round((size.width + 2 * b) * k);
+  canvas.height = Math.round((size.height + 2 * b) * k);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  // Origen en la esquina del corte; el sangrado queda en coordenadas negativas.
+  ctx.translate(b * k, b * k);
+
+  const rc: Ctx = { ctx, k, row, lp, opts, size, warnings };
+
+  if (!tpl) {
+    warnings.push(`el tipo «${row.tipo ?? ''}» no tiene plantilla`);
+    drawMissingTemplate(rc);
+    return { canvas, warnings };
+  }
+
+  for (const zone of tpl.zones) {
+    if (zone.hidden) continue;
+    ctx.save();
+    try {
+      if (zone.type === 'image') await drawImageZone(rc, zone);
+      else if (zone.type === 'text') await drawTextZone(rc, zone);
+      else if (zone.type === 'attributes') await drawAttributesZone(rc, zone);
+      else if (zone.type === 'attribute') await drawAttributeZone(rc, zone);
+    } finally {
+      ctx.restore();
+    }
+  }
+
+  if (opts.zones) drawZoneOutlines(rc, tpl.zones);
+  if (opts.guides) drawGuides(rc);
+  return { canvas, warnings };
+}
+
+// ---------------------------------------------------------------- geometría
+
+function zoneRect(zone: Zone, size: CardSize): Rect {
+  const { x, y, w, h } = zone.rect;
+  if (!zone.bleed) return { x, y, w, h };
+  const B = size.bleed;
+  const e = 0.01;
+  const r = { x, y, w, h };
+  if (x <= e) (r.x -= B), (r.w += B);
+  if (y <= e) (r.y -= B), (r.h += B);
+  if (x + w >= size.width - e) r.w += B;
+  if (y + h >= size.height - e) r.h += B;
+  return r;
+}
+
+function toPx(r: Rect, k: number): Rect {
+  return { x: r.x * k, y: r.y * k, w: r.w * k, h: r.h * k };
+}
+
+function drawFit(ctx: CanvasRenderingContext2D, img: HTMLImageElement, r: Rect, fit: ImageZone['fit']) {
+  if (fit === 'stretch') {
+    ctx.drawImage(img, r.x, r.y, r.w, r.h);
+    return;
+  }
+  const iw = img.naturalWidth || r.w;
+  const ih = img.naturalHeight || r.h;
+  const s = fit === 'contain' ? Math.min(r.w / iw, r.h / ih) : Math.max(r.w / iw, r.h / ih);
+  const w = iw * s;
+  const h = ih * s;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  ctx.drawImage(img, r.x + (r.w - w) / 2, r.y + (r.h - h) / 2, w, h);
+  ctx.restore();
+}
+
+// ---------------------------------------------------------------- recursos
+
+async function loadImage(rc: Ctx, path: string, what: string): Promise<HTMLImageElement | null> {
+  const img = await rc.lp.assets.image(path);
+  if (!img) rc.warnings.push(`no se encuentra la imagen «${path}» (${what})`);
+  return img;
+}
+
+async function attributeIcon(rc: Ctx, key: string, override?: string): Promise<HTMLImageElement | null> {
+  const def = rc.lp.project.attributes[key];
+  if (!def && !override) {
+    rc.warnings.push(`atributo desconocido «${key}»`);
+    return null;
+  }
+  return loadImage(rc, override ?? def.icon, key);
+}
+
+// ---------------------------------------------------------------- fuentes
+
+function cssFamily(family: string): string {
+  return /[,'"]/.test(family) || !/\s/.test(family) ? family : `"${family}"`;
+}
+
+function fontString(f: FontSpec, sizePx: number, bold = false, italic = false): string {
+  const style = italic || f.style === 'italic' ? 'italic' : 'normal';
+  const weight = bold ? 'bold' : String(f.weight ?? 'normal');
+  return `${style} ${weight} ${sizePx}px ${cssFamily(f.family)}`;
+}
+
+function paintText(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, f: FontSpec, k: number) {
+  if (f.strokeColor && f.strokeWidth) {
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = f.strokeColor;
+    ctx.lineWidth = f.strokeWidth * k * 2; // el trazo se centra en el contorno: la mitad queda fuera
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillStyle = f.color ?? '#000';
+  ctx.fillText(text, x, y);
+}
+
+// ---------------------------------------------------------------- zona imagen
+
+async function drawImageZone(rc: Ctx, zone: ImageZone) {
+  const value = zone.bind ? getField(rc.row, zone.bind, rc.opts.lang) : '';
+  if (value === '-') return;
+  const path = value || zone.default;
+  if (!path) return;
+  const img = await loadImage(rc, path, zone.id);
+  if (img) drawFit(rc.ctx, img, toPx(zoneRect(zone, rc.size), rc.k), zone.fit ?? 'cover');
+}
+
+// ---------------------------------------------------------------- zona texto
+
+/** Marcado: **negrita**, *cursiva*, {atributo} como icono, salto de línea real, "\n" o <br>. */
+type Tok = { t: 'w'; s: string; b: boolean; i: boolean } | { t: 'icon'; key: string } | { t: 'sp' } | { t: 'nl' };
+
+export function tokenize(text: string): Tok[] {
+  text = text.replace(/\r\n?/g, '\n').replace(/\\n|<br\s*\/?>/gi, '\n');
+  const out: Tok[] = [];
+  let bold = false;
+  let italic = false;
+  let buf = '';
+  const flush = () => {
+    if (buf) out.push({ t: 'w', s: buf, b: bold, i: italic });
+    buf = '';
+  };
+  for (let p = 0; p < text.length; p++) {
+    const c = text[p];
+    if (c === '*') {
+      flush();
+      if (text[p + 1] === '*') {
+        bold = !bold;
+        p++;
+      } else italic = !italic;
+    } else if (c === '{' && text.indexOf('}', p) > p) {
+      flush();
+      const end = text.indexOf('}', p);
+      out.push({ t: 'icon', key: normalizeKey(text.slice(p + 1, end)) });
+      p = end;
+    } else if (c === '\n') {
+      flush();
+      out.push({ t: 'nl' });
+    } else if (c === ' ' || c === '\t') {
+      flush();
+      if (out.at(-1)?.t !== 'sp') out.push({ t: 'sp' });
+    } else buf += c;
+  }
+  flush();
+  return out;
+}
+
+/** Una palabra es una secuencia de trozos sin espacios ("+1{fuerza}." no se parte). */
+interface Piece {
+  tok: Tok;
+  w: number;
+}
+interface Word {
+  pieces: Piece[];
+  w: number;
+}
+interface Line {
+  words: Word[];
+  w: number;
+  /** Última línea del párrafo (no se justifica). */
+  last: boolean;
+}
+
+const ICON_EM = 1.15;
+
+function iconBox(img: HTMLImageElement | null | undefined, sizePx: number) {
+  const h = sizePx * ICON_EM;
+  const ratio = img?.naturalHeight ? img.naturalWidth / img.naturalHeight : 1;
+  return { w: h * ratio, h };
+}
+
+function layoutText(
+  ctx: CanvasRenderingContext2D,
+  tokens: Tok[],
+  f: FontSpec,
+  sizePx: number,
+  maxW: number,
+  icons: Map<string, HTMLImageElement | null>,
+): { lines: Line[]; space: number } {
+  const paragraphs: Word[][] = [[]];
+  let word: Word | null = null;
+  for (const tok of tokens) {
+    if (tok.t === 'sp') {
+      word = null;
+      continue;
+    }
+    if (tok.t === 'nl') {
+      paragraphs.push([]);
+      word = null;
+      continue;
+    }
+    if (!word) {
+      word = { pieces: [], w: 0 };
+      paragraphs[paragraphs.length - 1].push(word);
+    }
+    let w: number;
+    if (tok.t === 'w') {
+      ctx.font = fontString(f, sizePx, tok.b, tok.i);
+      w = ctx.measureText(tok.s).width;
+    } else w = iconBox(icons.get(tok.key), sizePx).w;
+    word.pieces.push({ tok, w });
+    word.w += w;
+  }
+
+  ctx.font = fontString(f, sizePx);
+  const space = ctx.measureText(' ').width;
+  const lines: Line[] = [];
+  for (const para of paragraphs) {
+    let line: Line = { words: [], w: 0, last: false };
+    for (const wd of para) {
+      const add = line.words.length ? space + wd.w : wd.w;
+      if (line.words.length && line.w + add > maxW) {
+        lines.push(line);
+        line = { words: [wd], w: wd.w, last: false };
+      } else {
+        line.words.push(wd);
+        line.w += add;
+      }
+    }
+    line.last = true;
+    lines.push(line);
+  }
+  return { lines, space };
+}
+
+async function drawTextZone(rc: Ctx, zone: TextZone) {
+  const text = getField(rc.row, zone.bind, rc.opts.lang) || zone.default || '';
+  if (!text) return;
+  const { ctx, k } = rc;
+  const f = zone.font;
+
+  const tokens = tokenize(text);
+  const icons = new Map<string, HTMLImageElement | null>();
+  for (const tok of tokens) {
+    if (tok.t === 'icon' && !icons.has(tok.key)) icons.set(tok.key, await attributeIcon(rc, tok.key));
+  }
+
+  const r = toPx(zoneRect(zone, rc.size), k);
+  const pad = (zone.padding ?? 0) * k;
+  const box = { x: r.x + pad, y: r.y + pad, w: r.w - 2 * pad, h: r.h - 2 * pad };
+  const lh = zone.lineHeight ?? 1.2;
+  const minPt = Math.min(zone.minSize ?? f.size, f.size);
+
+  // Reducción automática: se baja de 0,25 en 0,25 pt hasta que cabe o se llega al mínimo.
+  let pt = f.size;
+  let sizePx: number;
+  let lay: ReturnType<typeof layoutText>;
+  for (;;) {
+    sizePx = ptToMm(pt) * k;
+    lay = layoutText(ctx, tokens, f, sizePx, box.w, icons);
+    const fits = lay.lines.length * sizePx * lh <= box.h + 0.5 && lay.lines.every((l) => l.w <= box.w + 0.5);
+    if (fits) break;
+    if (pt <= minPt) {
+      rc.warnings.push(`el texto de «${zone.id}» no cabe`);
+      break;
+    }
+    pt = Math.max(minPt, pt - 0.25);
+  }
+
+  const lineH = sizePx * lh;
+  const total = lay.lines.length * lineH;
+  let y = zone.valign === 'middle' ? box.y + (box.h - total) / 2 : zone.valign === 'bottom' ? box.y + box.h - total : box.y;
+  const align = zone.align ?? 'left';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  for (const line of lay.lines) {
+    const justify = align === 'justify' && !line.last && line.words.length > 1;
+    const gap = justify ? lay.space + (box.w - line.w) / (line.words.length - 1) : lay.space;
+    let x = align === 'center' ? box.x + (box.w - line.w) / 2 : align === 'right' ? box.x + box.w - line.w : box.x;
+    const base = y + (lineH - sizePx) / 2 + sizePx * 0.8;
+
+    line.words.forEach((word, wi) => {
+      if (wi) x += gap;
+      for (const p of word.pieces) {
+        if (p.tok.t === 'w') {
+          ctx.font = fontString(f, sizePx, p.tok.b, p.tok.i);
+          paintText(ctx, p.tok.s, x, base, f, k);
+        } else if (p.tok.t === 'icon') {
+          const img = icons.get(p.tok.key);
+          const bx = iconBox(img, sizePx);
+          if (img) ctx.drawImage(img, x, base - sizePx * 0.35 - bx.h / 2, bx.w, bx.h);
+        }
+        x += p.w;
+      }
+    });
+    y += lineH;
+  }
+}
+
+// ---------------------------------------------------------------- zona atributos
+
+async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
+  let items = parseAttributes(getField(rc.row, zone.bind ?? 'atributos', rc.opts.lang));
+  if (zone.keys) {
+    const keys = zone.keys.map(normalizeKey);
+    items = items.filter((it) => keys.includes(it.key));
+  }
+  if (!items.length) return;
+
+  const { ctx, k } = rc;
+  const r = toPx(zoneRect(zone, rc.size), k);
+  const icon = zone.iconSize * k;
+  const gap = (zone.gap ?? 1) * k;
+  const pos = zone.valuePosition ?? 'over';
+  const column = (zone.direction ?? 'column') === 'column';
+  const sizePx = ptToMm(zone.font.size) * k;
+
+  const imgs = await Promise.all(items.map((it) => attributeIcon(rc, it.key, it.icon)));
+
+  ctx.font = fontString(zone.font, sizePx);
+  const cells = items.map((it) => {
+    const tw = it.value ? ctx.measureText(it.value).width : 0;
+    if (pos === 'after') return { w: icon + (it.value ? gap * 0.5 + tw : 0), h: icon };
+    if (pos === 'below') return { w: Math.max(icon, tw), h: icon + (it.value ? sizePx * 1.1 : 0) };
+    return { w: icon, h: icon };
+  });
+
+  const total = cells.reduce((s, c) => s + (column ? c.h : c.w), 0) + gap * (cells.length - 1);
+  const avail = column ? r.h : r.w;
+  let cursor = zone.align === 'center' ? (avail - total) / 2 : zone.align === 'end' ? avail - total : 0;
+  const widest = Math.max(...cells.map((c) => c.w));
+
+  ctx.textBaseline = 'middle';
+  items.forEach((it, i) => {
+    const cell = cells[i];
+    const cx = column ? r.x + (r.w - (pos === 'after' ? widest : cell.w)) / 2 : r.x + cursor;
+    const cy = column ? r.y + cursor : r.y + (r.h - cell.h) / 2;
+    const ix = pos === 'below' ? cx + (cell.w - icon) / 2 : cx;
+    const iy = cy;
+
+    const img = imgs[i];
+    if (img) drawFit(ctx, img, { x: ix, y: iy, w: icon, h: icon }, 'contain');
+    else {
+      ctx.fillStyle = 'rgba(128,128,128,.6)';
+      ctx.beginPath();
+      ctx.arc(ix + icon / 2, iy + icon / 2, icon / 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    if (it.value) {
+      ctx.font = fontString(zone.font, sizePx);
+      if (pos === 'over') {
+        ctx.textAlign = 'center';
+        paintText(ctx, it.value, ix + icon / 2, iy + icon / 2, zone.font, k);
+      } else if (pos === 'after') {
+        ctx.textAlign = 'left';
+        paintText(ctx, it.value, ix + icon + gap * 0.5, iy + icon / 2, zone.font, k);
+      } else {
+        ctx.textAlign = 'center';
+        paintText(ctx, it.value, cx + cell.w / 2, iy + icon + sizePx * 0.6, zone.font, k);
+      }
+    }
+    cursor += (column ? cell.h : cell.w) + gap;
+  });
+}
+
+// ---------------------------------------------------------------- zona atributo fijo
+
+async function drawAttributeZone(rc: Ctx, zone: AttributeZone) {
+  const key = normalizeKey(zone.key ?? '');
+  const item = parseAttributes(getField(rc.row, zone.bind ?? 'atributos', rc.opts.lang)).find((it) => it.key === key);
+  if (!item && !zone.showIfMissing) return;
+
+  const def = rc.lp.project.attributes[key];
+  if (!def && !zone.icon && !item?.icon) rc.warnings.push(`atributo desconocido «${zone.key}» en la zona «${zone.id}»`);
+  const path = item?.icon ?? zone.icon ?? def?.icon;
+  const img = path ? await loadImage(rc, path, zone.id) : null;
+
+  const { ctx, k } = rc;
+  const r = toPx(zoneRect(zone, rc.size), k);
+  const pos = zone.valuePosition ?? 'over';
+  const sizePx = ptToMm(zone.font.size) * k;
+
+  // El icono ocupa la zona entera ("over"/"none"), su parte izquierda ("after") o su parte superior ("below").
+  let icon: Rect = r;
+  if (pos === 'after') {
+    const side = Math.min(r.w, r.h);
+    icon = { x: r.x, y: r.y + (r.h - side) / 2, w: side, h: side };
+  } else if (pos === 'below') {
+    const side = Math.max(0, Math.min(r.w, r.h - sizePx * 1.2));
+    icon = { x: r.x + (r.w - side) / 2, y: r.y, w: side, h: side };
+  }
+  if (img) drawFit(ctx, img, icon, 'contain');
+
+  const value = item?.value ?? '';
+  if (!value || pos === 'none') return;
+  ctx.font = fontString(zone.font, sizePx);
+  ctx.textBaseline = 'middle';
+  if (pos === 'over') {
+    ctx.textAlign = 'center';
+    paintText(ctx, value, r.x + r.w / 2, r.y + r.h / 2, zone.font, k);
+  } else if (pos === 'after') {
+    ctx.textAlign = 'left';
+    paintText(ctx, value, icon.x + icon.w + sizePx * 0.25, r.y + r.h / 2, zone.font, k);
+  } else {
+    ctx.textAlign = 'center';
+    paintText(ctx, value, r.x + r.w / 2, icon.y + icon.h + (r.h - icon.h) / 2, zone.font, k);
+  }
+}
+
+// ---------------------------------------------------------------- datos de ejemplo
+
+const PLACEHOLDER_TEXT: Record<string, string> = {
+  titulo: 'Título de la carta',
+  descripcion:
+    'Texto de reglas de ejemplo. Al atacar, gana **+1** de daño. Este párrafo sirve para ver cómo se reparte el texto dentro de la zona.',
+  sabor: '«Un texto de ambientación de ejemplo.»',
+};
+
+/** Una fila inventada para ver una plantilla que todavía no tiene cartas en el CSV. */
+export function placeholderRow(project: Project, tipo: string): CardRow {
+  const row: CardRow = { id: 'EJEMPLO', tipo };
+  const keys = new Set<string>();
+  for (const z of project.templates[tipo]?.zones ?? []) {
+    if (z.type === 'text' && !z.default) row[normalizeKey(z.bind)] = PLACEHOLDER_TEXT[normalizeKey(z.bind)] ?? `[${z.bind}]`;
+    if (z.type === 'attribute') keys.add(normalizeKey(z.key));
+    if (z.type === 'attributes') for (const key of z.keys ?? Object.keys(project.attributes).slice(0, 3)) keys.add(normalizeKey(key));
+  }
+  row.atributos = [...keys].map((key) => `${key}:9`).join(' | ');
+  return row;
+}
+
+// ---------------------------------------------------------------- ayudas visuales
+
+export const ZONE_COLORS: Record<ZoneType, string> = {
+  image: '#00b3ff',
+  text: '#ff9f1a',
+  attributes: '#2ecc71',
+  attribute: '#e056fd',
+};
+
+function drawZoneOutlines(rc: Ctx, zones: Zone[]) {
+  const { ctx, k } = rc;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, k * 0.2);
+  ctx.font = `bold ${k * 2}px sans-serif`;
+  ctx.textBaseline = 'top';
+  ctx.textAlign = 'left';
+  for (const z of zones) {
+    const r = toPx(z.rect, k);
+    ctx.strokeStyle = ZONE_COLORS[z.type] ?? '#f0f';
+    ctx.setLineDash([]);
+    ctx.strokeRect(r.x, r.y, r.w, r.h);
+    const label = z.id;
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = ctx.strokeStyle;
+    ctx.fillRect(r.x, r.y, tw + k, k * 2.6);
+    ctx.fillStyle = '#000';
+    ctx.fillText(label, r.x + k * 0.5, r.y + k * 0.3);
+  }
+  ctx.restore();
+}
+
+function drawGuides(rc: Ctx) {
+  const { ctx, k, size } = rc;
+  ctx.save();
+  ctx.lineWidth = Math.max(1, k * 0.15);
+  ctx.setLineDash([k * 1.2, k * 0.8]);
+  if (rc.opts.bleed) {
+    ctx.strokeStyle = 'rgba(255,0,80,.95)';
+    ctx.strokeRect(0, 0, size.width * k, size.height * k);
+  }
+  const s = size.safe ?? 0;
+  if (s > 0) {
+    ctx.strokeStyle = 'rgba(0,170,255,.9)';
+    ctx.strokeRect(s * k, s * k, (size.width - 2 * s) * k, (size.height - 2 * s) * k);
+  }
+  ctx.restore();
+}
+
+function drawMissingTemplate(rc: Ctx) {
+  const { ctx, k, size } = rc;
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(0, 0, size.width * k, size.height * k);
+  ctx.fillStyle = '#a00';
+  ctx.font = `bold ${k * 4}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Sin plantilla', (size.width * k) / 2, (size.height * k) / 2 - k * 3);
+  ctx.font = `${k * 3}px sans-serif`;
+  ctx.fillText(`tipo: «${rc.row.tipo ?? ''}»`, (size.width * k) / 2, (size.height * k) / 2 + k * 3);
+}

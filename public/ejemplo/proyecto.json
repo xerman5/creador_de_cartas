@@ -1,0 +1,109 @@
+{
+  "name": "Ejemplo — Naves del Vacío",
+  "csv": "cartas.csv",
+  "assetsDir": "assets",
+  "card": { "width": 63, "height": 88, "bleed": 3, "safe": 3 },
+  "fonts": [],
+
+  "attributes": {
+    "fuerza":      { "icon": "iconos/fuerza.svg",      "label": "Fuerza" },
+    "velocidad":   { "icon": "iconos/velocidad.svg",   "label": "Velocidad" },
+    "vida":        { "icon": "iconos/vida.svg",        "label": "Vida" },
+    "magia":       { "icon": "iconos/magia.svg",       "label": "Magia" },
+    "ataque":      { "icon": "iconos/ataque.svg",      "label": "Ataque" },
+    "resistencia": { "icon": "iconos/resistencia.svg", "label": "Resistencia" },
+    "coste":       { "icon": "iconos/coste.svg",       "label": "Coste" }
+  },
+
+  "templates": {
+    "nave": {
+      "zones": [
+        { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/nave.svg", "fit": "cover",
+          "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },
+        { "id": "cabecera", "type": "image", "bind": "cabecera", "default": "marcos/cabecera-nave.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 3, "w": 57, "h": 10 } },
+        { "id": "titulo", "type": "text", "bind": "titulo",
+          "rect": { "x": 5, "y": 3, "w": 53, "h": 10 }, "align": "center", "valign": "middle", "minSize": 7,
+          "font": { "family": "Georgia, serif", "size": 11, "weight": "bold", "color": "#ffffff", "strokeColor": "#0b1a33", "strokeWidth": 0.25 } },
+        { "id": "lateral izquierdo", "type": "image", "bind": "lateral izquierdo", "default": "marcos/lateral.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 15, "w": 12, "h": 40 } },
+        { "id": "atributos", "type": "attributes", "bind": "atributos",
+          "rect": { "x": 3, "y": 15, "w": 12, "h": 40 }, "direction": "column", "align": "center", "gap": 0.8,
+          "iconSize": 8.5, "valuePosition": "over",
+          "font": { "family": "Georgia, serif", "size": 12, "weight": "bold", "color": "#ffffff", "strokeColor": "#000000", "strokeWidth": 0.45 } },
+        { "id": "bloque 1", "type": "image", "bind": "bloque 1", "default": "marcos/bloque.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 56, "w": 57, "h": 19 } },
+        { "id": "descripcion", "type": "text", "bind": "descripcion",
+          "rect": { "x": 3, "y": 56, "w": 57, "h": 19 }, "padding": 2.5, "align": "justify", "valign": "middle", "minSize": 5, "lineHeight": 1.2,
+          "font": { "family": "Georgia, serif", "size": 7.5, "color": "#2a2118" } },
+        { "id": "bloque 2", "type": "image", "bind": "bloque 2", "default": "marcos/bloque-sabor.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 } },
+        { "id": "sabor", "type": "text", "bind": "sabor",
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 }, "padding": 1.5, "align": "center", "valign": "middle", "minSize": 5,
+          "font": { "family": "Georgia, serif", "size": 6.5, "style": "italic", "color": "#3b2f22" } },
+        { "id": "extra", "type": "text", "bind": "extra",
+          "rect": { "x": 3, "y": 85.2, "w": 57, "h": 2.6 }, "align": "right", "valign": "middle",
+          "font": { "family": "Georgia, serif", "size": 4.5, "color": "#c8d4e6" } }
+      ]
+    },
+
+    "enemigo": {
+      "zones": [
+        { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/enemigo.svg", "fit": "cover",
+          "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },
+        { "id": "cabecera", "type": "image", "bind": "cabecera", "default": "marcos/cabecera-enemigo.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 3, "w": 57, "h": 10 } },
+        { "id": "titulo", "type": "text", "bind": "titulo",
+          "rect": { "x": 5, "y": 3, "w": 53, "h": 10 }, "align": "center", "valign": "middle", "minSize": 7,
+          "font": { "family": "Georgia, serif", "size": 11, "weight": "bold", "color": "#fff1e8", "strokeColor": "#3a0707", "strokeWidth": 0.25 } },
+        { "id": "lateral derecho", "type": "image", "bind": "lateral derecho", "default": "marcos/lateral.svg", "fit": "stretch",
+          "rect": { "x": 48, "y": 15, "w": 12, "h": 40 } },
+        { "id": "atributos", "type": "attributes", "bind": "atributos",
+          "rect": { "x": 48, "y": 15, "w": 12, "h": 40 }, "direction": "column", "align": "center", "gap": 0.6,
+          "iconSize": 7.5, "valuePosition": "below",
+          "font": { "family": "Georgia, serif", "size": 9, "weight": "bold", "color": "#ffffff", "strokeColor": "#000000", "strokeWidth": 0.35 } },
+        { "id": "bloque 1", "type": "image", "bind": "bloque 1", "default": "marcos/bloque.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 56, "w": 57, "h": 19 } },
+        { "id": "descripcion", "type": "text", "bind": "descripcion",
+          "rect": { "x": 3, "y": 56, "w": 57, "h": 19 }, "padding": 2.5, "align": "justify", "valign": "middle", "minSize": 5,
+          "font": { "family": "Georgia, serif", "size": 7.5, "color": "#2a2118" } },
+        { "id": "bloque 2", "type": "image", "bind": "bloque 2", "default": "marcos/bloque-sabor.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 } },
+        { "id": "sabor", "type": "text", "bind": "sabor",
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 }, "padding": 1.5, "align": "center", "valign": "middle", "minSize": 5,
+          "font": { "family": "Georgia, serif", "size": 6.5, "style": "italic", "color": "#3b2f22" } }
+      ]
+    },
+
+    "localizacion": {
+      "zones": [
+        { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/localizacion.svg", "fit": "cover",
+          "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },
+        { "id": "cabecera", "type": "image", "bind": "cabecera", "default": "marcos/cabecera-localizacion.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 3, "w": 57, "h": 10 } },
+        { "id": "titulo", "type": "text", "bind": "titulo",
+          "rect": { "x": 6, "y": 3, "w": 40, "h": 10 }, "align": "left", "valign": "middle", "minSize": 7,
+          "font": { "family": "Georgia, serif", "size": 10.5, "weight": "bold", "color": "#ffffff", "strokeColor": "#0d2b22", "strokeWidth": 0.25 } },
+        { "id": "atributos", "type": "attributes", "bind": "atributos",
+          "rect": { "x": 44, "y": 3.5, "w": 14.5, "h": 9 }, "direction": "row", "align": "end", "gap": 0.8,
+          "iconSize": 7, "valuePosition": "over",
+          "font": { "family": "Georgia, serif", "size": 10, "weight": "bold", "color": "#3a2600", "strokeColor": "#fff3c4", "strokeWidth": 0.2 } },
+        { "id": "bloque 1", "type": "image", "bind": "bloque 1", "default": "marcos/bloque.svg", "fit": "stretch",
+          "rect": { "x": 3, "y": 52, "w": 57, "h": 33 } },
+        { "id": "descripcion", "type": "text", "bind": "descripcion",
+          "rect": { "x": 3, "y": 52, "w": 57, "h": 33 }, "padding": 3, "align": "left", "valign": "top", "minSize": 5, "lineHeight": 1.25,
+          "font": { "family": "Georgia, serif", "size": 7.5, "color": "#2a2118" } }
+      ]
+    },
+
+    "dorso": {
+      "zones": [
+        { "id": "fondo", "type": "image", "bind": "fondo", "default": "fondos/dorso.svg", "fit": "cover",
+          "rect": { "x": 0, "y": 0, "w": 63, "h": 88 }, "bleed": true },
+        { "id": "titulo", "type": "text", "bind": "titulo",
+          "rect": { "x": 8, "y": 36, "w": 47, "h": 16 }, "align": "center", "valign": "middle", "minSize": 10,
+          "font": { "family": "Georgia, serif", "size": 22, "weight": "bold", "color": "#f3d27a", "strokeColor": "#2a1a00", "strokeWidth": 0.4 } }
+      ]
+    }
+  }
+}
