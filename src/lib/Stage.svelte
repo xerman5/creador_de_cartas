@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { dragRect, snapTargets, type Guide, type Handle } from '../core/geometry';
-  import { cardSizeFor, ZONE_COLORS } from '../core/render';
-  import type { CardRow } from '../core/types';
+  import { dragRect, drawRect, snapTargets, type Guide, type Handle } from '../core/geometry';
+  import { BLEED_MM, cardSizeFor } from '../core/card';
+  import { ZONE_COLORS } from '../core/render';
+  import type { CardRow, Rect, ZoneType } from '../core/types';
   import CardView from './CardView.svelte';
   import type { Workspace } from './workspace.svelte';
 
@@ -12,6 +13,9 @@
     pxPerMm,
     grid,
     showGuides,
+    unsafe,
+    drawType = null,
+    oncreate,
     selected = $bindable(),
     onwarnings,
   }: {
@@ -22,6 +26,12 @@
     pxPerMm: number;
     grid: number;
     showGuides: boolean;
+    /** Zonas que entran en la zona peligrosa. */
+    unsafe: Set<number>;
+    /** Con un tipo, arrastrar sobre la carta traza una zona nueva de ese tipo. */
+    drawType?: ZoneType | null;
+    /** `rect` = trazado; `null` = clic sin arrastrar en `at` (mm). */
+    oncreate?: (rect: Rect | null, at: { x: number; y: number }) => void;
     selected: number | null;
     onwarnings: (w: string[]) => void;
   } = $props();
@@ -32,7 +42,7 @@
   const lp = $derived(ws.lp!);
   const tpl = $derived(lp.project.templates[tipo]);
   const size = $derived(cardSizeFor(lp.project, tpl));
-  const b = $derived(size.bleed);
+  const b = BLEED_MM;
   const width = $derived((size.width + 2 * b) * pxPerMm);
   const height = $derived((size.height + 2 * b) * pxPerMm);
   const opts = $derived({
@@ -44,11 +54,46 @@
 
   let guides = $state<Guide[]>([]);
   let dragging = $state(false);
+  let draft = $state.raw<Rect | null>(null);
+  let stageEl: HTMLDivElement;
 
   const px = (mm: number) => mm * pxPerMm;
 
-  function startDrag(e: PointerEvent, index: number, handle: Handle) {
+  /** Punto de pantalla → mm desde la esquina del corte. */
+  function toMm(ev: PointerEvent) {
+    const box = stageEl.getBoundingClientRect();
+    return { x: (ev.clientX - box.left) / pxPerMm - b, y: (ev.clientY - box.top) / pxPerMm - b };
+  }
+
+  function startDraw(e: PointerEvent) {
     if (e.button !== 0) return;
+    e.preventDefault();
+    const a = toMm(e);
+    const targets = snapTargets(size, tpl.zones, -1);
+    const sx = e.clientX;
+    const sy = e.clientY;
+    let moved = false;
+
+    const move = (ev: PointerEvent) => {
+      moved ||= Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) >= 4;
+      if (!moved) return;
+      const res = drawRect(a, toMm(ev), targets, { grid, threshold: SNAP_PX / pxPerMm, free: ev.altKey });
+      draft = res.rect;
+      guides = res.guides;
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      const rect = moved ? draft : null;
+      draft = null;
+      guides = [];
+      oncreate?.(rect, a);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+  }
+
+  function startDrag(e: PointerEvent, index: number, handle: Handle) {
+    if (e.button !== 0 || drawType) return;
     e.preventDefault();
     e.stopPropagation();
     selected = index;
@@ -85,11 +130,13 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={stageEl}
   class="stage"
   class:dragging
+  class:drawing={!!drawType}
   style:width="{width}px"
   style:height="{height}px"
-  onpointerdown={() => (selected = null)}
+  onpointerdown={(e) => (drawType ? startDraw(e) : (selected = null))}
 >
   <CardView {row} {lp} {opts} {onwarnings} displayWidth={width} />
 
@@ -100,6 +147,7 @@
         class:selected={selected === i}
         class:hidden={zone.hidden}
         class:locked={zone.locked}
+        class:unsafe={unsafe.has(i)}
         style:--c={ZONE_COLORS[zone.type]}
         style:left="{px(zone.rect.x)}px"
         style:top="{px(zone.rect.y)}px"
@@ -115,6 +163,19 @@
         {/if}
       </div>
     {/each}
+
+    {#if draft && drawType}
+      <div
+        class="zone draft"
+        style:--c={ZONE_COLORS[drawType]}
+        style:left="{px(draft.x)}px"
+        style:top="{px(draft.y)}px"
+        style:width="{px(draft.w)}px"
+        style:height="{px(draft.h)}px"
+      >
+        <span class="size">{draft.w} × {draft.h} mm</span>
+      </div>
+    {/if}
 
     {#each guides as g}
       <div
@@ -151,6 +212,35 @@
   .zone.selected {
     outline: 2px solid var(--c);
     z-index: 2;
+  }
+  .drawing,
+  .drawing .zone {
+    cursor: crosshair;
+  }
+  .zone.draft {
+    outline: 2px dashed var(--c);
+    background: color-mix(in srgb, var(--c) 18%, transparent);
+    pointer-events: none;
+    z-index: 4;
+  }
+  .size {
+    position: absolute;
+    right: 0;
+    bottom: -18px;
+    font-size: 10px;
+    padding: 0 4px;
+    background: var(--c);
+    color: #000;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .zone.unsafe {
+    outline: 2px solid #ff3b30;
+  }
+  .zone.unsafe .label {
+    background: #ff3b30;
+    color: #fff;
+    opacity: 1;
   }
   .zone.hidden {
     opacity: 0.4;

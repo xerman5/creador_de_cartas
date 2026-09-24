@@ -73,6 +73,19 @@ function snapSpan(pos: number, len: number, targets: number[], axis: Guide['axis
   return round(pos);
 }
 
+/** Rectángulo trazado de la esquina `a` a la `b` (mm, en cualquier dirección), con imanes en ambas. */
+export function drawRect(a: { x: number; y: number }, b: { x: number; y: number }, targets: SnapTargets, opts: DragOptions) {
+  const guides: Guide[] = [];
+  const x1 = snapValue(a.x, targets.x, 'x', opts, guides);
+  const y1 = snapValue(a.y, targets.y, 'y', opts, guides);
+  const x2 = snapValue(b.x, targets.x, 'x', opts, guides);
+  const y2 = snapValue(b.y, targets.y, 'y', opts, guides);
+  const L = Math.min(x1, x2);
+  const T = Math.min(y1, y2);
+  const rect = { x: round(L), y: round(T), w: round(Math.max(MIN, Math.max(x1, x2) - L)), h: round(Math.max(MIN, Math.max(y1, y2) - T)) };
+  return { rect, guides };
+}
+
 /** Nuevo rectángulo al arrastrar `handle` un desplazamiento (dx, dy) en mm desde `r0`. */
 export function dragRect(r0: Rect, handle: Handle, dx: number, dy: number, targets: SnapTargets, opts: DragOptions) {
   const guides: Guide[] = [];

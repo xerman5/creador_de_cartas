@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { cardBlob, cardFileName, downloadBlob, type ExportFormat } from '../core/export';
+  import { backRef, copiesOf } from '../core/deck';
+  import { cardBlob, cardFileName, downloadBlob, type ExportFormat, type ExportOptions } from '../core/export';
   import type { LoadedProject } from '../core/project';
   import type { RenderOptions } from '../core/render';
   import CardView from './CardView.svelte';
@@ -8,23 +9,22 @@
     lp,
     index,
     opts,
-    exportDpi,
+    exportOpts,
     onclose,
     onselect,
   }: {
     lp: LoadedProject;
     index: number;
     opts: RenderOptions;
-    exportDpi: number;
+    exportOpts: ExportOptions;
     onclose: () => void;
     onselect: (index: number) => void;
   } = $props();
 
   const row = $derived(lp.rows[index]);
-  const backIndex = $derived.by(() => {
-    const back = row.trasera?.trim();
-    return back ? lp.rows.findIndex((r) => r.id?.trim() === back) : -1;
-  });
+  const back = $derived(backRef(row, lp.project));
+  const backIndex = $derived(back ? lp.rows.findIndex((r) => r.id?.trim() === back) : -1);
+  const copies = $derived(copiesOf(row).copies);
   const fields = $derived(Object.entries(row).filter(([, v]) => v.trim() !== ''));
   const detailOpts = $derived({ ...opts, dpi: opts.dpi * 1.8 });
 
@@ -34,7 +34,7 @@
   async function save(format: ExportFormat) {
     busy = true;
     try {
-      const eo = { dpi: exportDpi, lang: opts.lang, format, langSuffix: lp.langs.length > 1 };
+      const eo = { ...exportOpts, format };
       downloadBlob(await cardBlob(row, lp, eo), cardFileName(row, index, eo));
     } finally {
       busy = false;
@@ -55,7 +55,7 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="dialog" onclick={(e) => e.stopPropagation()}>
     <header>
-      <h2>{row.id || `Fila ${index + 1}`} <small>{row.tipo}</small></h2>
+      <h2>{row.id || `Fila ${index + 1}`} <small>{row.tipo} · {copies} {copies === 1 ? 'copia' : 'copias'}</small></h2>
       <div class="actions">
         <button disabled={busy} onclick={() => save('png')}>Descargar PNG</button>
         <button disabled={busy} onclick={() => save('jpg')}>Descargar JPG</button>
@@ -74,10 +74,10 @@
             <button class="plain" onclick={() => onselect(backIndex)} title="Ir a la trasera">
               <CardView row={lp.rows[backIndex]} {lp} opts={detailOpts} />
             </button>
-            <figcaption>Trasera: {lp.rows[backIndex].id}</figcaption>
+            <figcaption>Trasera: {lp.rows[backIndex].id}{row.trasera?.trim() ? '' : ' (de la plantilla)'}</figcaption>
           </figure>
-        {:else if row.trasera}
-          <p class="warn">La trasera «{row.trasera}» no existe en el CSV.</p>
+        {:else if back}
+          <p class="warn">La trasera «{back}» no existe en el CSV.</p>
         {/if}
       </div>
 

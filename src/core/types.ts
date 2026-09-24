@@ -9,12 +9,11 @@ export interface Rect {
   h: Mm;
 }
 
+/** Tamaño del corte. El sangrado es fijo (`BLEED_MM`). */
 export interface CardSize {
   width: Mm;
   height: Mm;
-  /** Sangrado añadido por cada lado al exportar. */
-  bleed: Mm;
-  /** Margen de seguridad (solo guía visual). */
+  /** Margen de seguridad: entre él y el corte está la zona peligrosa. */
   safe?: Mm;
 }
 
@@ -99,6 +98,8 @@ export type ZoneType = Zone['type'];
 export interface Template {
   /** Permite que un tipo tenga otro tamaño de carta. */
   size?: Partial<CardSize>;
+  /** `id` de la carta del CSV que hace de trasera por defecto (la columna «trasera» la sustituye). */
+  back?: string;
   zones: Zone[];
 }
 

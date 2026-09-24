@@ -1,4 +1,5 @@
 import { parseAttributes } from './attributes';
+import { cardPixels, cardSizeFor, type CardPixels } from './card';
 import type { LoadedProject } from './project';
 import { getField, normalizeKey } from './text';
 import type {
@@ -19,9 +20,9 @@ import type {
 export interface RenderOptions {
   dpi: number;
   lang: string;
-  /** Incluir el sangrado en el lienzo. */
+  /** Incluir el sangrado en el lienzo (la exportación siempre lo incluye). */
   bleed: boolean;
-  /** Dibujar línea de corte y margen de seguridad. */
+  /** Señalar sangrado, corte, zona peligrosa y margen de seguridad. */
   guides?: boolean;
   /** Dibujar el contorno de cada zona (para diseñar la anatomía). */
   zones?: boolean;
@@ -40,6 +41,7 @@ interface Ctx {
   lp: LoadedProject;
   opts: RenderOptions;
   size: CardSize;
+  px: CardPixels;
   warnings: string[];
 }
 
@@ -49,28 +51,25 @@ export function templateFor(project: Project, row: CardRow): Template | undefine
   return project.templates[normalizeKey(row.tipo ?? '')];
 }
 
-export function cardSizeFor(project: Project, tpl?: Template): CardSize {
-  return { ...project.card, ...tpl?.size };
-}
-
 /** Se dibuja siempre en un lienzo nuevo para que renders concurrentes no se pisen. */
 export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOptions): Promise<RenderResult> {
   const warnings: string[] = [];
   const tpl = templateFor(lp.project, row);
   const size = cardSizeFor(lp.project, tpl);
   const k = opts.dpi / 25.4;
-  const b = opts.bleed ? size.bleed : 0;
+  const px = cardPixels(size, opts.dpi);
+  const offset = opts.bleed ? px.bleed : 0;
 
   const canvas = document.createElement('canvas');
-  canvas.width = Math.round((size.width + 2 * b) * k);
-  canvas.height = Math.round((size.height + 2 * b) * k);
+  canvas.width = px.trimWidth + 2 * offset;
+  canvas.height = px.trimHeight + 2 * offset;
   const ctx = canvas.getContext('2d')!;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   // Origen en la esquina del corte; el sangrado queda en coordenadas negativas.
-  ctx.translate(b * k, b * k);
+  ctx.translate(offset, offset);
 
-  const rc: Ctx = { ctx, k, row, lp, opts, size, warnings };
+  const rc: Ctx = { ctx, k, row, lp, opts, size, px, warnings };
 
   if (!tpl) {
     warnings.push(`el tipo «${row.tipo ?? ''}» no tiene plantilla`);
@@ -98,17 +97,25 @@ export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOp
 
 // ---------------------------------------------------------------- geometría
 
-function zoneRect(zone: Zone, size: CardSize): Rect {
+/**
+ * Rectángulo de la zona en píxeles. Con `bleed`, los bordes que tocan el corte se llevan
+ * exactamente al borde del sangrado (aunque no se muestre, para que el encuadre no cambie).
+ */
+function zonePx(rc: Ctx, zone: Zone): Rect {
+  const { k, px, size } = rc;
   const { x, y, w, h } = zone.rect;
-  if (!zone.bleed) return { x, y, w, h };
-  const B = size.bleed;
-  const e = 0.01;
-  const r = { x, y, w, h };
-  if (x <= e) (r.x -= B), (r.w += B);
-  if (y <= e) (r.y -= B), (r.h += B);
-  if (x + w >= size.width - e) r.w += B;
-  if (y + h >= size.height - e) r.h += B;
-  return r;
+  let L = x * k;
+  let T = y * k;
+  let R = (x + w) * k;
+  let B = (y + h) * k;
+  if (zone.bleed) {
+    const e = 0.01;
+    if (x <= e) L = -px.bleed;
+    if (y <= e) T = -px.bleed;
+    if (x + w >= size.width - e) R = px.trimWidth + px.bleed;
+    if (y + h >= size.height - e) B = px.trimHeight + px.bleed;
+  }
+  return { x: L, y: T, w: R - L, h: B - T };
 }
 
 function toPx(r: Rect, k: number): Rect {
@@ -181,7 +188,7 @@ async function drawImageZone(rc: Ctx, zone: ImageZone) {
   const path = value || zone.default;
   if (!path) return;
   const img = await loadImage(rc, path, zone.id);
-  if (img) drawFit(rc.ctx, img, toPx(zoneRect(zone, rc.size), rc.k), zone.fit ?? 'cover');
+  if (img) drawFit(rc.ctx, img, zonePx(rc, zone), zone.fit ?? 'cover');
 }
 
 // ---------------------------------------------------------------- zona texto
@@ -314,7 +321,7 @@ async function drawTextZone(rc: Ctx, zone: TextZone) {
     if (tok.t === 'icon' && !icons.has(tok.key)) icons.set(tok.key, await attributeIcon(rc, tok.key));
   }
 
-  const r = toPx(zoneRect(zone, rc.size), k);
+  const r = zonePx(rc, zone);
   const pad = (zone.padding ?? 0) * k;
   const box = { x: r.x + pad, y: r.y + pad, w: r.w - 2 * pad, h: r.h - 2 * pad };
   const lh = zone.lineHeight ?? 1.2;
@@ -378,7 +385,7 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
   if (!items.length) return;
 
   const { ctx, k } = rc;
-  const r = toPx(zoneRect(zone, rc.size), k);
+  const r = zonePx(rc, zone);
   const icon = zone.iconSize * k;
   const gap = (zone.gap ?? 1) * k;
   const pos = zone.valuePosition ?? 'over';
@@ -447,7 +454,7 @@ async function drawAttributeZone(rc: Ctx, zone: AttributeZone) {
   const img = path ? await loadImage(rc, path, zone.id) : null;
 
   const { ctx, k } = rc;
-  const r = toPx(zoneRect(zone, rc.size), k);
+  const r = zonePx(rc, zone);
   const pos = zone.valuePosition ?? 'over';
   const sizePx = ptToMm(zone.font.size) * k;
 
@@ -531,19 +538,40 @@ function drawZoneOutlines(rc: Ctx, zones: Zone[]) {
   ctx.restore();
 }
 
+export const GUIDE_COLORS = {
+  bleed: 'rgba(255, 0, 80, 0.3)',
+  trim: 'rgba(255, 0, 80, 0.95)',
+  danger: 'rgba(255, 170, 0, 0.25)',
+  safe: 'rgba(0, 200, 255, 0.95)',
+};
+
+/** Sangrado (se recorta), línea de corte, zona peligrosa (corte → margen) y margen de seguridad. */
 function drawGuides(rc: Ctx) {
-  const { ctx, k, size } = rc;
+  const { ctx, k, size, px } = rc;
+  const W = px.trimWidth;
+  const H = px.trimHeight;
+  const B = px.bleed;
+  const s = (size.safe ?? 0) * k;
+  const band = (outer: Rect, inner: Rect, color: string) => {
+    ctx.beginPath();
+    ctx.rect(outer.x, outer.y, outer.w, outer.h);
+    ctx.rect(inner.x, inner.y, inner.w, inner.h);
+    ctx.fillStyle = color;
+    ctx.fill('evenodd');
+  };
+  const trim = { x: 0, y: 0, w: W, h: H };
+  const safe = { x: s, y: s, w: W - 2 * s, h: H - 2 * s };
+
   ctx.save();
-  ctx.lineWidth = Math.max(1, k * 0.15);
-  ctx.setLineDash([k * 1.2, k * 0.8]);
-  if (rc.opts.bleed) {
-    ctx.strokeStyle = 'rgba(255,0,80,.95)';
-    ctx.strokeRect(0, 0, size.width * k, size.height * k);
-  }
-  const s = size.safe ?? 0;
+  if (rc.opts.bleed) band({ x: -B, y: -B, w: W + 2 * B, h: H + 2 * B }, trim, GUIDE_COLORS.bleed);
+  if (s > 0) band(trim, safe, GUIDE_COLORS.danger);
+  ctx.lineWidth = Math.max(1, k * 0.12);
+  ctx.strokeStyle = GUIDE_COLORS.trim;
+  ctx.strokeRect(0, 0, W, H);
   if (s > 0) {
-    ctx.strokeStyle = 'rgba(0,170,255,.9)';
-    ctx.strokeRect(s * k, s * k, (size.width - 2 * s) * k, (size.height - 2 * s) * k);
+    ctx.setLineDash([k * 1.2, k * 0.8]);
+    ctx.strokeStyle = GUIDE_COLORS.safe;
+    ctx.strokeRect(safe.x, safe.y, safe.w, safe.h);
   }
   ctx.restore();
 }

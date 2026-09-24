@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { placeholderRow, cardSizeFor, ZONE_COLORS } from '../core/render';
+  import { BLEED_MM, cardSizeFor, safeAreaIssues } from '../core/card';
+  import { GUIDE_COLORS, placeholderRow, ZONE_COLORS } from '../core/render';
   import { normalizeKey } from '../core/text';
-  import type { Zone, ZoneType } from '../core/types';
+  import type { Rect, Zone, ZoneType } from '../core/types';
   import { newZone, uniqueId, ZONE_LABELS } from '../core/zones';
   import Stage from './Stage.svelte';
   import ZoneProps from './ZoneProps.svelte';
@@ -34,6 +35,7 @@
     return placeholderRow(project, tipo);
   });
 
+  const backCandidates = $derived(lp.rows.filter((r) => r.id?.trim() && normalizeKey(r.tipo ?? '') !== tipo));
   const columns = $derived([...new Set(lp.columns.map((c) => c.replace(/-[a-z]{2}$/, '')))]);
   const counts = $derived.by(() => {
     const m: Record<string, number> = {};
@@ -47,15 +49,21 @@
   let viewH = $state(600);
   const size = $derived(cardSizeFor(project, tpl));
   const fitPxPerMm = $derived(
-    Math.max(2, Math.min((viewW - 48) / (size.width + 2 * size.bleed), (viewH - 48) / (size.height + 2 * size.bleed))),
+    Math.max(2, Math.min((viewW - 48) / (size.width + 2 * BLEED_MM), (viewH - 48) / (size.height + 2 * BLEED_MM))),
   );
   const pxPerMm = $derived(zoom ?? fitPxPerMm);
 
+  /** Tipo de zona que se va a trazar sobre la carta. */
+  let tool = $state<ZoneType | null>(null);
   let grid = $state(0.5);
   let showGuides = $state(true);
-  let warnings = $state<string[]>([]);
+  let renderWarnings = $state<string[]>([]);
+  const safeIssues = $derived(tpl ? safeAreaIssues(tpl, size) : []);
+  const unsafe = $derived(new Set(safeIssues.map((i) => i.index)));
+  const warnings = $derived([...safeIssues.map((i) => i.message), ...renderWarnings]);
 
   function selectTipo(t: string) {
+    tool = null;
     chosenTipo = t;
     selectedRaw = null;
     previewId = '';
@@ -104,9 +112,16 @@
     ws.update((p) => fn(p.templates[tipo].zones), { coalesce });
   }
 
-  function addZone(type: ZoneType) {
+  /** Con `rect` la zona ocupa lo trazado; si no, se crea con su tamaño por defecto centrada en `point`. */
+  function addZone(type: ZoneType, rect: Rect | null, point: { x: number; y: number }) {
     if (!tpl) return;
     const zone = newZone(type, project, size, tpl.zones.map((z) => z.id));
+    if (rect) zone.rect = rect;
+    else {
+      const { w, h } = zone.rect;
+      const clamp = (v: number, max: number) => Math.round(Math.min(Math.max(v, 0), max) * 2) / 2;
+      zone.rect = { x: clamp(point.x - w / 2, size.width - w), y: clamp(point.y - h / 2, size.height - h), w, h };
+    }
     // Lo nuevo va arriba del todo salvo las imágenes, que suelen ser fondos y marcos: justo encima de la última imagen.
     let at = tpl.zones.length;
     if (type === 'image') at = tpl.zones.map((z) => z.type).lastIndexOf('image') + 1;
@@ -158,7 +173,10 @@
     const i = selected;
     const step = e.shiftKey ? 5 : grid || 0.5;
     const mod = e.metaKey || e.ctrlKey;
-    if (e.key === 'Escape') selectedRaw = null;
+    if (e.key === 'Escape') {
+      if (tool) tool = null;
+      else selectedRaw = null;
+    }
     else if (i === null) return;
     else if (e.key === 'Delete' || e.key === 'Backspace') deleteZone(i);
     else if (mod && e.key.toLowerCase() === 'd') duplicateZone(i);
@@ -204,9 +222,14 @@
         <h4>Zonas <small>(arriba = delante)</small></h4>
         <div class="add">
           {#each ZONE_TYPES as t}
-            <button class="small" style:--c={ZONE_COLORS[t]} onclick={() => addZone(t)}>＋ {ZONE_LABELS[t]}</button>
+            <button class="small" class:active={tool === t} style:--c={ZONE_COLORS[t]} onclick={() => (tool = tool === t ? null : t)}>
+              ＋ {ZONE_LABELS[t]}
+            </button>
           {/each}
         </div>
+        {#if tool}
+          <p class="hint">Traza el rectángulo sobre la carta. Un clic la crea con su tamaño por defecto. Esc cancela.</p>
+        {/if}
         <ul class="list">
           {#each tpl.zones.map((z, i) => ({ z, i })).reverse() as { z, i } (i)}
             <li class="layer" class:active={selected === i} class:dim={z.hidden}>
@@ -222,7 +245,7 @@
               </span>
             </li>
           {:else}
-            <li class="muted">Sin zonas. Añade una con los botones de arriba.</li>
+            <li class="muted">Sin zonas. Elige un tipo arriba y trázala sobre la carta.</li>
           {/each}
         </ul>
       </section>
@@ -259,7 +282,13 @@
 
       <div class="viewport" bind:clientWidth={viewW} bind:clientHeight={viewH}>
         <div class="canvas-wrap">
-          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} bind:selected={selectedRaw} onwarnings={(w) => (warnings = w)} />
+          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} {unsafe}
+            drawType={tool}
+            oncreate={(rect, at) => {
+              if (tool) addZone(tool, rect, at);
+              tool = null;
+            }}
+            bind:selected={selectedRaw} onwarnings={(w) => (renderWarnings = w)} />
         </div>
       </div>
 
@@ -268,9 +297,14 @@
           {@const r = tpl.zones[selected].rect}
           <span>x {r.x} · y {r.y} · {r.w} × {r.h} mm</span>
         {:else}
-          <span>{size.width} × {size.height} mm + {size.bleed} mm de sangrado</span>
+          <span>{size.width} × {size.height} mm</span>
+          <span class="legend">
+            <i style:background={GUIDE_COLORS.bleed}></i>sangrado {BLEED_MM} mm
+            <i style:background={GUIDE_COLORS.danger}></i>zona peligrosa {size.safe ?? 0} mm
+            <i class="line" style:border-color={GUIDE_COLORS.safe}></i>margen de seguridad
+          </span>
         {/if}
-        <span class="muted">Arrastra para mover · Alt: sin imanes · Flechas: mover (Mayús ×10) · Supr: borrar · ⌘D: duplicar</span>
+        <span class="muted">Botón ＋ y arrastra sobre la carta: nueva zona · Arrastra para mover · Alt: sin imanes · Flechas: mover (Mayús ×10) · Supr: borrar · ⌘D: duplicar</span>
         {#if warnings.length}
           <span class="warn" title={warnings.join('\n')}>⚠ {warnings.length} aviso{warnings.length > 1 ? 's' : ''}: {warnings[0]}</span>
         {/if}
@@ -296,6 +330,23 @@
         Selecciona una zona en la carta o en la lista para editarla.<br /><br />
         Las zonas se dibujan de abajo arriba según la lista: pon el fondo al final y los textos al principio.
       </p>
+      <label class="stack">
+        Trasera por defecto
+        <select
+          value={tpl.back ?? ''}
+          onchange={(e) => {
+            const v = e.currentTarget.value;
+            ws.update((p) => void (p.templates[tipo].back = v || undefined));
+          }}
+        >
+          <option value="">(ninguna)</option>
+          {#each backCandidates as r}<option value={r.id.trim()}>{r.id.trim()} · {r.tipo}</option>{/each}
+          {#if tpl.back && !backCandidates.some((r) => r.id.trim() === tpl.back)}
+            <option value={tpl.back}>{tpl.back} (no existe)</option>
+          {/if}
+        </select>
+      </label>
+      <p class="muted">La columna «trasera» del CSV la sustituye en cada carta; «-» = sin trasera.</p>
       <label class="check">
         <input
           type="checkbox"
@@ -520,6 +571,24 @@
   .muted {
     color: var(--muted);
   }
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+  }
+  .legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-left: 6px;
+  }
+  .legend i.line {
+    height: 0;
+    border-top: 2px dashed;
+    border-radius: 0;
+  }
   .warn {
     color: var(--warn);
     overflow: hidden;
@@ -530,6 +599,12 @@
     gap: 6px;
     align-items: center;
   }
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--muted);
+  }
   .f {
     display: flex;
     gap: 4px;
@@ -538,6 +613,11 @@
   }
   .f input {
     width: 70px;
+  }
+  .hint {
+    margin: 0;
+    font-size: 11px;
+    color: var(--accent);
   }
   .zone-actions {
     margin-top: 12px;
