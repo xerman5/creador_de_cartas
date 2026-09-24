@@ -10,6 +10,10 @@ export interface FileSource {
   write?(path: string, data: string | Blob): Promise<void>;
   /** Archivos dentro de una carpeta, con rutas relativas a ella. */
   list?(dir: string): Promise<string[]>;
+  /** Borra un archivo si existe (solo con permiso de escritura). */
+  remove?(path: string): Promise<void>;
+  /** Pide permiso de escritura; hay que llamarlo justo tras el clic del usuario. */
+  requestWrite?(): Promise<void>;
 }
 
 function cleanPath(p: string): string {
@@ -50,11 +54,29 @@ export class DirectorySource implements FileSource {
     return files.map((f) => `${f?.lastModified ?? 0}:${f?.size ?? 0}`).join('|');
   }
 
-  async write(path: string, data: string | Blob) {
+  requestWrite() {
+    return this.ensureWritable();
+  }
+
+  private async ensureWritable() {
     if ((await this.root.queryPermission?.({ mode: 'readwrite' })) !== 'granted') {
       const state = await this.root.requestPermission?.({ mode: 'readwrite' });
       if (state && state !== 'granted') throw new Error('No hay permiso para escribir en la carpeta.');
     }
+  }
+
+  async remove(path: string) {
+    await this.ensureWritable();
+    const parts = cleanPath(path).split('/').filter(Boolean);
+    try {
+      await (await this.dir(parts.slice(0, -1))).removeEntry(parts[parts.length - 1]);
+    } catch {
+      // ya no existe
+    }
+  }
+
+  async write(path: string, data: string | Blob) {
+    await this.ensureWritable();
     const parts = cleanPath(path).split('/').filter(Boolean);
     const dir = await this.dir(parts.slice(0, -1), true);
     const handle = await dir.getFileHandle(parts[parts.length - 1], { create: true });

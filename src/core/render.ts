@@ -1,5 +1,7 @@
 import { parseAttributes } from './attributes';
 import { cardPixels, cardSizeFor, type CardPixels } from './card';
+import { pickColor, resolveColor } from './color';
+import { conditionMatches } from './condition';
 import type { LoadedProject } from './project';
 import { getField, normalizeKey } from './text';
 import type {
@@ -11,6 +13,7 @@ import type {
   ImageZone,
   Project,
   Rect,
+  ShapeZone,
   Template,
   TextZone,
   Zone,
@@ -78,13 +81,14 @@ export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOp
   }
 
   for (const zone of tpl.zones) {
-    if (zone.hidden) continue;
+    if (zone.hidden || !conditionMatches(zone.showIf, row, opts.lang)) continue;
     ctx.save();
     try {
       if (zone.type === 'image') await drawImageZone(rc, zone);
       else if (zone.type === 'text') await drawTextZone(rc, zone);
       else if (zone.type === 'attributes') await drawAttributesZone(rc, zone);
       else if (zone.type === 'attribute') await drawAttributeZone(rc, zone);
+      else if (zone.type === 'shape') drawShapeZone(rc, zone);
     } finally {
       ctx.restore();
     }
@@ -155,6 +159,33 @@ async function attributeIcon(rc: Ctx, key: string, override?: string): Promise<H
     return null;
   }
   return loadImage(rc, override ?? def.icon, key);
+}
+
+// ---------------------------------------------------------------- colores
+
+/**
+ * Color de la celda `bind` o, si está vacía, `fixed`; nombres de la paleta resueltos.
+ * Un color que el canvas no entiende se avisa en vez de pintar con el anterior.
+ */
+function colorFor(rc: Ctx, bind: string | undefined, fixed: string | undefined, what: string): string {
+  const cell = bind ? getField(rc.row, bind, rc.opts.lang) : '';
+  const color = pickColor(cell, fixed, rc.lp.project.colors);
+  if (!color) return '';
+  const probe = '#010203';
+  rc.ctx.fillStyle = probe;
+  rc.ctx.fillStyle = color;
+  if (rc.ctx.fillStyle === probe && color.toLowerCase() !== probe) {
+    rc.warnings.push(`color no válido «${color}» (${what})`);
+    return '';
+  }
+  return color;
+}
+
+/** Fuente con los nombres de la paleta resueltos y, si hay `colorBind`, el color de la carta. */
+function fontFor(rc: Ctx, f: FontSpec, what: string, colorBind?: string): FontSpec {
+  const palette = rc.lp.project.colors;
+  const color = colorBind ? colorFor(rc, colorBind, f.color, what) : resolveColor(f.color, palette);
+  return { ...f, color: color || f.color, strokeColor: resolveColor(f.strokeColor, palette) || undefined };
 }
 
 // ---------------------------------------------------------------- fuentes
@@ -313,7 +344,7 @@ async function drawTextZone(rc: Ctx, zone: TextZone) {
   const text = getField(rc.row, zone.bind, rc.opts.lang) || zone.default || '';
   if (!text) return;
   const { ctx, k } = rc;
-  const f = zone.font;
+  const f = fontFor(rc, zone.font, zone.id, zone.colorBind);
 
   const tokens = tokenize(text);
   const icons = new Map<string, HTMLImageElement | null>();
@@ -390,11 +421,12 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
   const gap = (zone.gap ?? 1) * k;
   const pos = zone.valuePosition ?? 'over';
   const column = (zone.direction ?? 'column') === 'column';
-  const sizePx = ptToMm(zone.font.size) * k;
+  const font = fontFor(rc, zone.font, zone.id);
+  const sizePx = ptToMm(font.size) * k;
 
   const imgs = await Promise.all(items.map((it) => attributeIcon(rc, it.key, it.icon)));
 
-  ctx.font = fontString(zone.font, sizePx);
+  ctx.font = fontString(font, sizePx);
   const cells = items.map((it) => {
     const tw = it.value ? ctx.measureText(it.value).width : 0;
     if (pos === 'after') return { w: icon + (it.value ? gap * 0.5 + tw : 0), h: icon };
@@ -425,16 +457,16 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
     }
 
     if (it.value) {
-      ctx.font = fontString(zone.font, sizePx);
+      ctx.font = fontString(font, sizePx);
       if (pos === 'over') {
         ctx.textAlign = 'center';
-        paintText(ctx, it.value, ix + icon / 2, iy + icon / 2, zone.font, k);
+        paintText(ctx, it.value, ix + icon / 2, iy + icon / 2, font, k);
       } else if (pos === 'after') {
         ctx.textAlign = 'left';
-        paintText(ctx, it.value, ix + icon + gap * 0.5, iy + icon / 2, zone.font, k);
+        paintText(ctx, it.value, ix + icon + gap * 0.5, iy + icon / 2, font, k);
       } else {
         ctx.textAlign = 'center';
-        paintText(ctx, it.value, cx + cell.w / 2, iy + icon + sizePx * 0.6, zone.font, k);
+        paintText(ctx, it.value, cx + cell.w / 2, iy + icon + sizePx * 0.6, font, k);
       }
     }
     cursor += (column ? cell.h : cell.w) + gap;
@@ -456,7 +488,8 @@ async function drawAttributeZone(rc: Ctx, zone: AttributeZone) {
   const { ctx, k } = rc;
   const r = zonePx(rc, zone);
   const pos = zone.valuePosition ?? 'over';
-  const sizePx = ptToMm(zone.font.size) * k;
+  const font = fontFor(rc, zone.font, zone.id);
+  const sizePx = ptToMm(font.size) * k;
 
   // El icono ocupa la zona entera ("over"/"none"), su parte izquierda ("after") o su parte superior ("below").
   let icon: Rect = r;
@@ -471,17 +504,47 @@ async function drawAttributeZone(rc: Ctx, zone: AttributeZone) {
 
   const value = item?.value ?? '';
   if (!value || pos === 'none') return;
-  ctx.font = fontString(zone.font, sizePx);
+  ctx.font = fontString(font, sizePx);
   ctx.textBaseline = 'middle';
   if (pos === 'over') {
     ctx.textAlign = 'center';
-    paintText(ctx, value, r.x + r.w / 2, r.y + r.h / 2, zone.font, k);
+    paintText(ctx, value, r.x + r.w / 2, r.y + r.h / 2, font, k);
   } else if (pos === 'after') {
     ctx.textAlign = 'left';
-    paintText(ctx, value, icon.x + icon.w + sizePx * 0.25, r.y + r.h / 2, zone.font, k);
+    paintText(ctx, value, icon.x + icon.w + sizePx * 0.25, r.y + r.h / 2, font, k);
   } else {
     ctx.textAlign = 'center';
-    paintText(ctx, value, r.x + r.w / 2, icon.y + icon.h + (r.h - icon.h) / 2, zone.font, k);
+    paintText(ctx, value, r.x + r.w / 2, icon.y + icon.h + (r.h - icon.h) / 2, font, k);
+  }
+}
+
+// ---------------------------------------------------------------- zona forma
+
+/** El borde se dibuja por dentro del rectángulo de la zona: la forma nunca se sale de él. */
+function drawShapeZone(rc: Ctx, zone: ShapeZone) {
+  const { ctx, k } = rc;
+  const r = zonePx(rc, zone);
+  const fill = colorFor(rc, zone.fillBind, zone.fill, zone.id);
+  const stroke = colorFor(rc, zone.strokeBind, zone.stroke, zone.id);
+  const sw = stroke ? Math.max(0, (zone.strokeWidth ?? 0) * k) : 0;
+  if (!fill && !sw) return;
+
+  const x = r.x + sw / 2;
+  const y = r.y + sw / 2;
+  const w = Math.max(0, r.w - sw);
+  const h = Math.max(0, r.h - sw);
+  ctx.globalAlpha = Math.min(1, Math.max(0, zone.opacity ?? 1));
+  ctx.beginPath();
+  if (zone.shape === 'ellipse') ctx.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+  else ctx.roundRect(x, y, w, h, Math.min((zone.radius ?? 0) * k, w / 2, h / 2));
+  if (fill) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  if (sw) {
+    ctx.lineWidth = sw;
+    ctx.strokeStyle = stroke;
+    ctx.stroke();
   }
 }
 
@@ -514,6 +577,7 @@ export const ZONE_COLORS: Record<ZoneType, string> = {
   text: '#ff9f1a',
   attributes: '#2ecc71',
   attribute: '#e056fd',
+  shape: '#ff5c8a',
 };
 
 function drawZoneOutlines(rc: Ctx, zones: Zone[]) {

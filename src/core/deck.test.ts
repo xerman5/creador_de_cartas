@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { backRef, copiesOf, planExport } from './deck';
-import { buildManifest, fileNames } from './export';
+import { buildManifest, exportSettings, fileNames } from './export';
 import type { CardRow, Project } from './types';
 
 const project: Project = {
@@ -111,5 +111,13 @@ describe('buildManifest', () => {
     expect(Object.keys(m.images)).toEqual(['N01.png', 'N02.png', 'E01.png', 'E02.png', 'G01.png', 'D01.png', 'D02.png']);
     expect(m.images['N01.png'].px).toEqual({ trimWidth: 744, trimHeight: 1039, bleed: 35, width: 814, height: 1109 });
     expect(m.images['G01.png'].trimMm).toEqual({ width: 70, height: 120 });
+  });
+});
+
+describe('exportSettings', () => {
+  it('rellena valores por defecto y corrige los que salen de rango', () => {
+    expect(exportSettings(project)).toEqual({ dpi: 300, format: 'png', quality: 95 });
+    expect(exportSettings({ ...project, export: { dpi: 299.6, format: 'jpg', quality: 20 } })).toEqual({ dpi: 300, format: 'jpg', quality: 50 });
+    expect(exportSettings({ ...project, export: { dpi: 5000, format: 'gif' as 'png' } })).toEqual({ dpi: 1200, format: 'png', quality: 95 });
   });
 });

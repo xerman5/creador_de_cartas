@@ -1,6 +1,7 @@
 <script lang="ts">
   import { dragRect, drawRect, snapTargets, type Guide, type Handle } from '../core/geometry';
   import { BLEED_MM, cardSizeFor } from '../core/card';
+  import { conditionMatches } from '../core/condition';
   import { ZONE_COLORS } from '../core/render';
   import type { CardRow, Rect, ZoneType } from '../core/types';
   import CardView from './CardView.svelte';
@@ -148,6 +149,8 @@
         class:hidden={zone.hidden}
         class:locked={zone.locked}
         class:unsafe={unsafe.has(i)}
+        class:inactive={!conditionMatches(zone.showIf, row, ws.lang)}
+        title={zone.showIf && !conditionMatches(zone.showIf, row, ws.lang) ? `No se dibuja en esta carta: ${zone.showIf}` : undefined}
         style:--c={ZONE_COLORS[zone.type]}
         style:left="{px(zone.rect.x)}px"
         style:top="{px(zone.rect.y)}px"
@@ -241,6 +244,10 @@
     background: #ff3b30;
     color: #fff;
     opacity: 1;
+  }
+  .zone.inactive {
+    outline-style: dotted;
+    background: repeating-linear-gradient(45deg, color-mix(in srgb, var(--c) 12%, transparent) 0 4px, transparent 4px 8px);
   }
   .zone.hidden {
     opacity: 0.4;

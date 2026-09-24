@@ -19,6 +19,7 @@
 
   const zone = $derived(ws.project!.templates[tipo].zones[index]);
   const attrKeys = $derived(Object.keys(ws.project!.attributes));
+  const palette = $derived(ws.project!.colors ?? {});
   const fontFamilies = $derived([
     ...new Set([...ws.project!.fonts.map((f) => f.family), 'Georgia, serif', 'Arial, sans-serif', 'Times New Roman, serif']),
   ]);
@@ -30,6 +31,7 @@
 
   function toHex(color: string | undefined): string {
     if (!color) return '#000000';
+    color = palette[color.trim().toLowerCase()] ?? color;
     if (/^#[0-9a-f]{6}$/i.test(color)) return color;
     const m = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(color);
     return m ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}` : '#000000';
@@ -86,6 +88,7 @@
       <input type="color" value={toHex(value)} oninput={(e) => edit(key, (z) => set(z, str(e)))} />
       <input
         type="text"
+        list="palette-colors"
         value={value ?? ''}
         placeholder="—"
         onchange={(e) => edit(key, (z) => set(z, str(e).trim() || undefined))}
@@ -130,6 +133,9 @@
 <datalist id="csv-columns">
   {#each columns as c}<option value={c}></option>{/each}
 </datalist>
+<datalist id="palette-colors">
+  {#each Object.keys(palette) as c}<option value={c}></option>{/each}
+</datalist>
 <datalist id="font-families">
   {#each fontFamilies as f}<option value={f}></option>{/each}
 </datalist>
@@ -157,6 +163,19 @@
     <input type="checkbox" checked={!!zone.bleed} onchange={(e) => edit('bleed', (z) => (z.bleed = e.currentTarget.checked || undefined))} />
     Extender al sangrado
   </label>
+  <label class="f">
+    <span>Mostrar solo si</span>
+    <input
+      type="text"
+      list="csv-columns"
+      value={zone.showIf ?? ''}
+      placeholder="siempre"
+      onchange={(e) => edit('showIf', (z) => (z.showIf = str(e).trim() || undefined))}
+    />
+  </label>
+  {#if zone.showIf}
+    <p class="hint"><code>col</code> con valor · <code>!col</code> vacía · <code>col=a|b</code> igual a · <code>col!=a</code> distinta</p>
+  {/if}
 
   {#if zone.type === 'image'}
     <h4>Imagen</h4>
@@ -200,6 +219,8 @@
     </div>
     {@render number('Tamaño mínimo', zone.minSize, 'minSize', (z, v) => (z.minSize = v), 0.25, 'pt')}
     {@render fontEditor(zone.font)}
+    {@render column('Color desde', zone.colorBind, 'colorBind', (z, v) => (z.colorBind = v || undefined))}
+    <p class="hint">Columna del CSV con el color del texto (un nombre de la paleta o #hex); vacía = el color de la fuente.</p>
   {:else if zone.type === 'attributes'}
     <h4>Lista de atributos</h4>
     {@render column('Columna CSV', zone.bind ?? 'atributos', 'bind', (z, v) => (z.bind = v || undefined))}
@@ -234,6 +255,24 @@
       ['below', 'Debajo'],
     ], (z, v) => (z.valuePosition = v))}
     {@render fontEditor(zone.font)}
+  {:else if zone.type === 'shape'}
+    <h4>Forma</h4>
+    {@render select('Forma', zone.shape, 'shape', [
+      ['rect', 'Rectángulo'],
+      ['ellipse', 'Elipse'],
+    ], (z, v) => (z.shape = v))}
+    {@render color('Relleno', zone.fill, 'fill', (z, v) => (z.fill = v))}
+    {@render column('Relleno desde', zone.fillBind, 'fillBind', (z, v) => (z.fillBind = v || undefined))}
+    {@render color('Borde', zone.stroke, 'stroke', (z, v) => (z.stroke = v))}
+    {@render column('Borde desde', zone.strokeBind, 'strokeBind', (z, v) => (z.strokeBind = v || undefined))}
+    <div class="grid2">
+      {@render number('Grosor', zone.strokeWidth, 'strokeWidth', (z, v) => (z.strokeWidth = Math.max(0, v)), 0.1)}
+      {#if zone.shape !== 'ellipse'}
+        {@render number('Radio', zone.radius, 'radius', (z, v) => (z.radius = Math.max(0, v)), 0.5)}
+      {/if}
+    </div>
+    {@render number('Opacidad', Math.round((zone.opacity ?? 1) * 100), 'opacity', (z, v) => (z.opacity = Math.min(100, Math.max(0, v)) / 100), 5, '%')}
+    <p class="hint">«Desde» = columna del CSV con el color de cada carta (nombre de la paleta o #hex); «-» en la celda lo quita.</p>
   {:else if zone.type === 'attribute'}
     <h4>Atributo</h4>
     <label class="f">

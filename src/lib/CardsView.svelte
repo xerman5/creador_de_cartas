@@ -1,9 +1,10 @@
 <script lang="ts">
   import { BLEED_MM } from '../core/card';
   import { planExport } from '../core/deck';
-  import { downloadBlob, exportZip, slug, type ExportFormat, type ExportOptions } from '../core/export';
+  import { exportFiles, exportSettings, saveToFolder, saveZip, slug, type ExportOptions } from '../core/export';
+  import type { ExportSettings } from '../core/types';
   import { projectIssues } from '../core/project';
-  import type { RenderOptions } from '../core/render';
+  import { renderCard, type RenderOptions } from '../core/render';
   import { normalizeKey } from '../core/text';
   import type { CardRow } from '../core/types';
   import CardDetail from './CardDetail.svelte';
@@ -23,10 +24,10 @@
   let tipoFilter = $state('');
   let search = $state('');
   let selected = $state<number | null>(null);
-  let exportFormat = $state<ExportFormat>('png');
-  let exportDpi = $state(300);
-  let exportQuality = $state(95);
+  let destination = $state<'zip' | 'folder'>('zip');
   let progress = $state('');
+  let notice = $state('');
+  let abort: AbortController | null = null;
   let warnings = $state<Record<number, string[]>>({});
 
   const previewOpts = $derived.by<RenderOptions>(() => {
@@ -53,13 +54,20 @@
     return [...map];
   });
 
+  const settings = $derived(exportSettings(lp.project));
   const exportOpts = $derived<ExportOptions>({
-    dpi: Math.max(72, Math.round(exportDpi || 300)),
+    dpi: settings.dpi,
     lang: ws.lang,
-    format: exportFormat,
-    quality: Math.min(100, Math.max(50, exportQuality || 95)) / 100,
+    format: settings.format,
+    quality: settings.quality / 100,
     langSuffix: lp.langs.length > 1,
   });
+  const canFolder = $derived(!!ws.source?.write);
+  const folderDir = $derived(lp.langs.length > 1 && ws.lang ? `export/${ws.lang}` : 'export');
+
+  function setExport<K extends keyof ExportSettings>(key: K, value: ExportSettings[K]) {
+    ws.update((p) => void (p.export = { ...exportSettings(p), [key]: value }), { coalesce: `export/${key}` });
+  }
   const plan = $derived(planExport(lp.rows, visible.map((e) => e.index), lp.project));
   const totalCopies = $derived(plan.fronts.reduce((s, f) => s + f.copies, 0));
   const imageCount = $derived(plan.fronts.length + plan.backs.length);
@@ -76,17 +84,55 @@
     warnings = {};
   });
 
+  /** Cartas comprobadas en segundo plano con el proyecto actual (las miniaturas se dibujan solo a la vista). */
+  let checked = $state(0);
+  // Primitivos: cambiar guías o zonas no reinicia la comprobación.
+  const checkDpi = $derived(previewOpts.dpi);
+  const checkLang = $derived(ws.lang);
+  const idle = () => new Promise<void>((r) => ('requestIdleCallback' in window ? requestIdleCallback(() => r(), { timeout: 500 }) : setTimeout(r, 16)));
+
+  $effect(() => {
+    const current = lp;
+    const opts: RenderOptions = { dpi: checkDpi, lang: checkLang, bleed: true };
+    let cancelled = false;
+    checked = 0;
+    (async () => {
+      await idle();
+      for (let i = 0; i < current.rows.length; i++) {
+        if (cancelled) return;
+        const { warnings: w } = await renderCard(current.rows[i], current, opts);
+        if (cancelled) return;
+        warnings[i] = w;
+        checked = i + 1;
+        await idle();
+      }
+    })();
+    return () => (cancelled = true);
+  });
+
   async function exportVisible() {
     if (progress) return;
+    abort = new AbortController();
+    const signal = abort.signal;
+    const toFolder = destination === 'folder' && canFolder;
+    const started = performance.now();
     progress = `0 / ${imageCount}`;
+    notice = '';
     try {
-      const zip = await exportZip(plan, lp, exportOpts, (n, total) => (progress = `${n} / ${total}`));
-      const suffix = [tipoFilter, ws.lang].filter(Boolean).map(slug).join('_');
-      downloadBlob(zip, `${slug(lp.project.name)}${suffix ? `_${suffix}` : ''}.zip`);
+      const files = exportFiles(plan, lp, exportOpts, (n, total) => (progress = `${n} / ${total}`), signal);
+      if (toFolder) await saveToFolder(files, ws.source!, folderDir, signal);
+      else {
+        const suffix = [tipoFilter, ws.lang].filter(Boolean).map(slug).join('_');
+        if (!(await saveZip(files, `${slug(lp.project.name)}${suffix ? `_${suffix}` : ''}.zip`, signal))) return;
+      }
+      const secs = Math.round((performance.now() - started) / 1000);
+      notice = `${imageCount} imágenes exportadas${toFolder ? ` en ${folderDir}/` : ''} (${secs} s).`;
     } catch (e) {
-      ws.error = e instanceof Error ? e.message : String(e);
+      if (signal.aborted) notice = 'Exportación cancelada.';
+      else ws.error = e instanceof Error ? e.message : String(e);
     } finally {
       progress = '';
+      abort = null;
     }
   }
 </script>
@@ -104,22 +150,40 @@
     <section>
       <h4>Exportar</h4>
       <div class="row">
-        <select bind:value={exportFormat}>
+        <select id="export-format" value={settings.format} onchange={(e) => setExport('format', e.currentTarget.value as ExportSettings['format'])}>
           <option value="png">PNG</option>
           <option value="jpg">JPG</option>
         </select>
-        <label class="inline"><input type="number" min="72" max="1200" step="1" bind:value={exportDpi} /> ppp</label>
-        {#if exportFormat === 'jpg'}
-          <label class="inline" title="Calidad JPG"><input type="number" min="50" max="100" step="1" bind:value={exportQuality} /> %</label>
+        <label class="inline">
+          <input id="export-dpi" type="number" min="72" max="1200" step="1" value={settings.dpi} onchange={(e) => setExport('dpi', e.currentTarget.valueAsNumber)} /> ppp
+        </label>
+        {#if settings.format === 'jpg'}
+          <label class="inline" title="Calidad JPG">
+            <input id="export-quality" type="number" min="50" max="100" step="1" value={settings.quality} onchange={(e) => setExport('quality', e.currentTarget.valueAsNumber)} /> %
+          </label>
         {/if}
       </div>
-      <button class="primary" onclick={exportVisible} disabled={!!progress || !imageCount}>
-        {progress ? `Exportando ${progress}` : `Exportar ${plan.fronts.length} cartas + ${plan.backs.length} traseras`}
-      </button>
+      {#if canFolder}
+        <select id="export-destination" bind:value={destination}>
+          <option value="zip">Descargar .zip</option>
+          <option value="folder">Carpeta del proyecto ({folderDir}/)</option>
+        </select>
+      {/if}
+      {#if progress}
+        <div class="row">
+          <button class="primary grow" disabled>Exportando {progress}</button>
+          <button onclick={() => abort?.abort()}>Cancelar</button>
+        </div>
+      {:else}
+        <button class="primary" onclick={exportVisible} disabled={!imageCount}>
+          Exportar {plan.fronts.length} cartas + {plan.backs.length} traseras
+        </button>
+      {/if}
       <p class="muted small">
-        {totalCopies} copias en total · .zip con {imageCount} imágenes y <code>manifest.json</code><br />
-        Sangrado de 3 mm incluido
+        {totalCopies} copias en total · {imageCount} imágenes y <code>manifest.json</code><br />
+        Sangrado de 3 mm incluido · los ajustes se guardan en el proyecto
       </p>
+      {#if notice}<p class="small ok">{notice}</p>{/if}
     </section>
 
     <section>
@@ -143,6 +207,9 @@
       </div>
     </section>
 
+    {#if checked < lp.rows.length}
+      <p class="muted small">Comprobando cartas… {checked} / {lp.rows.length}</p>
+    {/if}
     {#if issues.length || allWarnings.length}
       <section>
         <h4 class="warn">Avisos ({issues.length + allWarnings.length})</h4>
@@ -165,7 +232,7 @@
         <div class="grid">
           {#each entries as e (e.index)}
             <button class="thumb" onclick={() => (selected = e.index)}>
-              <CardView row={e.row} {lp} opts={previewOpts} onwarnings={(w) => (warnings[e.index] = w)} />
+              <CardView row={e.row} {lp} opts={previewOpts} lazy onwarnings={(w) => (warnings[e.index] = w)} />
               <span class="cap">
                 {e.row.id || `fila ${e.index + 1}`}
                 {#if warnings[e.index]?.length}<span class="badge">⚠ {warnings[e.index].length}</span>{/if}
@@ -244,6 +311,12 @@
   .seg button.active {
     background: var(--accent);
     color: #fff;
+  }
+  .grow {
+    flex: 1;
+  }
+  .ok {
+    color: var(--muted);
   }
   .small {
     font-size: 11px;

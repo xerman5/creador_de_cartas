@@ -1,5 +1,6 @@
 import { AssetStore, type FileSource } from './assets';
 import { BLEED_MM, cardSizeFor, DEFAULT_SAFE_MM, safeAreaIssues } from './card';
+import { parseCondition } from './condition';
 import { detectLangs, parseCsv } from './csv';
 import { normalizeKey, readText } from './text';
 import type { AttributeDef, CardRow, Project, Template } from './types';
@@ -16,7 +17,7 @@ export interface LoadedProject {
   errors: string[];
 }
 
-const ZONE_TYPES = ['image', 'text', 'attributes', 'attribute'];
+const ZONE_TYPES = ['image', 'text', 'attributes', 'attribute', 'shape'];
 
 function normalizeProject(raw: any, errors: string[]): Project {
   const attributes: Record<string, AttributeDef> = {};
@@ -50,6 +51,8 @@ function normalizeProject(raw: any, errors: string[]): Project {
     fonts: raw.fonts ?? [],
     attributes,
     templates,
+    ...(raw.colors ? { colors: Object.fromEntries(Object.entries<string>(raw.colors).map(([k, v]) => [normalizeKey(k), v])) } : {}),
+    ...(raw.export ? { export: raw.export } : {}),
   };
 }
 
@@ -115,9 +118,20 @@ export interface TemplateColumn {
 /** Columnas del CSV que usa una plantilla. */
 export function templateColumns(tpl: Template): TemplateColumn[] {
   const cols = new Map<string, boolean>();
+  const add = (col: string | undefined, localized: boolean) => {
+    if (!col?.trim()) return;
+    const key = normalizeKey(col);
+    cols.set(key, localized || !!cols.get(key));
+  };
   for (const z of tpl.zones) {
-    const bind = z.type === 'attributes' || z.type === 'attribute' ? (z.bind ?? 'atributos') : z.bind;
-    if (bind) cols.set(normalizeKey(bind), z.type === 'text');
+    add(parseCondition(z.showIf ?? '')?.column, false);
+    if (z.type === 'shape') {
+      add(z.fillBind, false);
+      add(z.strokeBind, false);
+    } else if (z.type === 'text') {
+      add(z.bind, true);
+      add(z.colorBind, false);
+    } else add(z.type === 'image' ? z.bind : (z.bind ?? 'atributos'), false);
   }
   return [...cols].map(([name, localized]) => ({ name, localized }));
 }

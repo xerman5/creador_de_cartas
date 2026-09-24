@@ -16,7 +16,7 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 
 1. **Proyecto**: tamaño de carta, margen de seguridad, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
 2. **Plantillas**: la anatomía de cada tipo. Añade zonas (imagen, texto, atributo fijo, lista de atributos) **trazando el rectángulo sobre la carta** (o con un clic, a tamaño por defecto); muévelas y redimensiónalas con imanes a bordes, centros, margen de seguridad y otras zonas. Las propiedades se editan a la derecha. Vista previa con cualquier carta del CSV o con datos de ejemplo.
-3. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json` en un .zip).
+3. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json`). Solo se dibujan las miniaturas a la vista; el resto se comprueba en segundo plano para que la lista de avisos esté completa.
 
 Guardar (⌘S) escribe `proyecto.json` en la carpeta; si el navegador no puede escribir (Safari/Firefox o el ejemplo), lo descarga. ⌘Z / ⇧⌘Z deshacen y rehacen.
 
@@ -74,6 +74,7 @@ fuerza:3 | velocidad:5 | vida:10
   "attributes": {
     "fuerza": { "icon": "iconos/fuerza.svg", "label": "Fuerza" }
   },
+  "colors": { "comun": "#9aa7b8", "legendaria": "#f0b429" },
   "templates": {
     "nave": {                       // = valor de la columna tipo
       "size": { "height": 120 },    // opcional: otro tamaño para este tipo
@@ -88,7 +89,14 @@ Coordenadas en mm desde la esquina del **corte** (el sangrado queda en negativo)
 
 ## Exportación
 
-Exporta las cartas visibles (respeta el filtro) en PNG o JPG, a los ppp elegidos, siempre con sangrado:
+Exporta las cartas visibles (respeta el filtro) en PNG o JPG, a los ppp elegidos, siempre con sangrado. Formato, ppp y calidad JPG se guardan en `proyecto.json` (`"export": { "dpi": 300, "format": "png", "quality": 95 }`).
+
+Destinos:
+
+- **Descargar .zip**: el zip se genera en streaming, carta a carta; la memoria no crece con el tamaño del mazo. En Chrome/Edge se elige dónde guardarlo y se escribe directamente en disco.
+- **Carpeta del proyecto** (Chrome/Edge con la carpeta abierta): escribe en `export/` (`export/<idioma>/` si hay varios idiomas). La carpeta refleja la última exportación: se borran los archivos que declaraba el `manifest.json` anterior y ya no se generan; nada más se toca.
+
+Se puede cancelar en cualquier momento.
 
 - Cada imagen se genera **una sola vez**. Las cartas que otras usan como trasera (y no tienen trasera propia) se exportan como traseras, no como cartas, aunque el filtro no las incluya.
 - Nombre de archivo: el `id` (más `_es`, `_en`… si el CSV tiene varios idiomas). Si dos ids dan el mismo nombre, el segundo lleva `-2`.
@@ -114,21 +122,37 @@ Exporta las cartas visibles (respeta el filtro) en PNG o JPG, a los ppp elegidos
 
 - **Sangrado fijo de 3 mm** por lado, siempre incluido al exportar. Si la imprenta pide menos, se recorta después.
 - **Zona peligrosa**: la franja entre el corte y el margen de seguridad (`safe`, 3 mm por defecto). Los textos y atributos que entran en ella generan un aviso y se marcan en rojo en el editor; las imágenes no cuentan (fondos y marcos llegan al borde a propósito).
+- **Color sRGB declarado**: el canvas dibuja en sRGB y cada archivo lo dice: PNG con `sRGB` + `gAMA` + `cHRM`; JPG con perfil ICC sRGB (el que incrusta el navegador o, si no pone ninguno, uno compacto CC0). Así el programa de maquetación no tiene que adivinarlo.
 - **Píxeles exactos**: `ancho = round(ancho_mm · ppp / 25,4) + 2 · round(3 · ppp / 25,4)`. El corte cae en un píxel entero y el sangrado es idéntico en los cuatro lados (póker a 300 ppp: 744 × 1039 + 35 px por lado = 814 × 1109 px).
 
 ### Zonas
 
 Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que tocan el borde de la carta se extienden hasta el sangrado; úsalo en el fondo), `hidden`, `locked` (no se selecciona con el ratón en el editor).
 
+`showIf` (opcional): la zona solo se dibuja en las cartas que cumplen la condición. En el editor, las zonas que no se dibujan en la carta de vista previa aparecen rayadas.
+
+| `showIf` | Se dibuja si |
+|---|---|
+| `rareza` | la columna tiene valor |
+| `!rareza` | la columna está vacía |
+| `rareza=legendaria` | vale eso (sin distinguir mayúsculas ni tildes); `legendaria\|épica` = cualquiera |
+| `rareza!=común` | vale otra cosa o está vacía |
+
 **image**: `bind` (columna), `default` (ruta), `fit`: `cover` | `contain` | `stretch`.
 
-**text**: `bind`, `default`, `font`, `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
+**text**: `bind`, `default`, `font`, `colorBind` (columna con el color del texto de cada carta), `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
 
 **attribute** (atributo fijo): `key` (clave del catálogo), `icon` (opcional, sustituye al del catálogo), `valuePosition`: `over` | `after` | `below` | `none`, `showIfMissing`, `font`. Se dibuja solo si la carta tiene ese atributo.
 
 **attributes** (lista): `bind` (por defecto `atributos`), `direction`: `column` | `row`, `align`: `start` | `center` | `end`, `iconSize` (mm), `gap` (mm), `valuePosition`: `over` | `after` | `below`, `font`, `keys` (opcional: solo estos atributos, para repartirlos entre dos laterales).
 
+**shape** (forma): `shape`: `rect` | `ellipse`, `fill` y `stroke` (color fijo o nombre de la paleta), `fillBind` y `strokeBind` (columna con el color de cada carta; `-` en la celda lo quita), `strokeWidth` (mm, se dibuja por dentro de la zona), `radius` (mm, esquinas), `opacity` (0–1). Para cintas, fondos de texto, gemas de rareza…
+
 **font**: `family`, `size` (pt), `weight`, `style` (`italic`), `color`, `strokeColor`, `strokeWidth` (mm, contorno para leer sobre ilustraciones).
+
+### Colores
+
+Cualquier color admite un **nombre de la paleta** del proyecto (`"colors": { "fuego": "#c33", "legendaria": "#f0b429" }`) o un color CSS (`#c33`, `rgb(…)`, `crimson`). Con `fillBind`/`strokeBind`/`colorBind`, la celda del CSV decide el color de cada carta: una columna `rareza` con `legendaria` pinta de dorado. Un color que no se entiende genera un aviso.
 
 ## Código
 
@@ -141,10 +165,12 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   project.ts      carga de proyecto.json + CSV
   csv.ts          lectura del CSV, idiomas
   attributes.ts   sintaxis de atributos
+  condition.ts    condiciones de las zonas (showIf)
+  color.ts        paleta y colores desde el CSV
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip
-  dpi.ts          escribe los ppp en PNG/JPG
+  metadata.ts     ppp y perfil sRGB en PNG/JPG
   assets.ts       lectura de archivos (carpeta, lista, URL) y caché de imágenes
 src/lib/      componentes Svelte
   workspace.svelte.ts   estado: abrir, editar (inmutable), deshacer, guardar
@@ -156,5 +182,3 @@ src/lib/      componentes Svelte
 ## Próximos pasos
 
 - Cerrar la convención de nombres y el manifiesto con el programa de PDF.
-- Exportar en segundo plano (Web Worker + OffscreenCanvas) y escribir el lote por partes o directamente en la carpeta del proyecto, para mazos grandes.
-- Carga diferida de miniaturas para mazos grandes.

@@ -11,7 +11,7 @@
   let { ws, initialTipo = '' }: { ws: Workspace; initialTipo?: string } = $props();
 
   const PLACEHOLDER = '__ejemplo__';
-  const ZONE_TYPES: ZoneType[] = ['image', 'text', 'attribute', 'attributes'];
+  const ZONE_TYPES: ZoneType[] = ['image', 'shape', 'text', 'attribute', 'attributes'];
 
   const lp = $derived(ws.lp!);
   const project = $derived(lp.project);
@@ -122,9 +122,12 @@
       const clamp = (v: number, max: number) => Math.round(Math.min(Math.max(v, 0), max) * 2) / 2;
       zone.rect = { x: clamp(point.x - w / 2, size.width - w), y: clamp(point.y - h / 2, size.height - h), w, h };
     }
-    // Lo nuevo va arriba del todo salvo las imágenes, que suelen ser fondos y marcos: justo encima de la última imagen.
+    // Lo nuevo va arriba del todo salvo imágenes y formas, que suelen ser fondos y marcos:
+    // justo encima de la última de ellas, por debajo de textos y atributos.
     let at = tpl.zones.length;
-    if (type === 'image') at = tpl.zones.map((z) => z.type).lastIndexOf('image') + 1;
+    if (type === 'image' || type === 'shape') {
+      at = tpl.zones.map((z) => z.type === 'image' || z.type === 'shape').lastIndexOf(true) + 1;
+    }
     zonesUpdate((zones) => zones.splice(at, 0, zone));
     selectedRaw = at;
   }
@@ -236,6 +239,7 @@
               <button class="item" onclick={() => (selectedRaw = i)}>
                 <span class="dot" style:background={ZONE_COLORS[z.type]}></span>
                 <span class="name">{z.id}</span>
+                {#if z.showIf}<small class="cond" title="Solo si: {z.showIf}">si</small>{/if}
               </button>
               <span class="tools">
                 <button class="icon" title={z.hidden ? 'Mostrar' : 'Ocultar'} onclick={() => toggle(i, 'hidden')}>{z.hidden ? '◌' : '●'}</button>
@@ -462,6 +466,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .cond {
+    flex: none;
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #2b2f38;
+    color: var(--muted);
   }
   .dot {
     flex: none !important;
