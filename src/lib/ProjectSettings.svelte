@@ -1,5 +1,6 @@
 <script lang="ts">
   import Papa from 'papaparse';
+  import { BLEED_MM, cardPixels } from '../core/card';
   import { downloadBlob } from '../core/export';
   import { hasColumn, templateColumns } from '../core/project';
   import { normalizeKey } from '../core/text';
@@ -16,7 +17,9 @@
     CARD_PRESETS.find((p) => p.width === project.card.width && p.height === project.card.height)?.name ?? '',
   );
 
-  const csvTipos = $derived([...new Set(lp.rows.map((r) => normalizeKey(r.tipo ?? '')).filter(Boolean))]);
+  const px300 = $derived(cardPixels(project.card, 300));
+
+  const csvTipos =$derived([...new Set(lp.rows.map((r) => normalizeKey(r.tipo ?? '')).filter(Boolean))]);
   const tipos = $derived([...new Set([...Object.keys(project.templates), ...csvTipos])]);
   const count = (t: string) => lp.rows.filter((r) => normalizeKey(r.tipo ?? '') === t).length;
   const langs = $derived(lp.langs.length ? lp.langs : ['es', 'en']);
@@ -128,12 +131,14 @@
       <div class="grid4">
         <label class="f"><span>Ancho</span><input type="number" step="0.5" value={project.card.width} onchange={(e) => setCard('width', e)} /></label>
         <label class="f"><span>Alto</span><input type="number" step="0.5" value={project.card.height} onchange={(e) => setCard('height', e)} /></label>
-        <label class="f"><span>Sangrado</span><input type="number" step="0.5" value={project.card.bleed} onchange={(e) => setCard('bleed', e)} /></label>
-        <label class="f"><span>Margen seguridad</span><input type="number" step="0.5" value={project.card.safe ?? 0} onchange={(e) => setCard('safe', e)} /></label>
+        <label class="f"><span>Sangrado</span><input type="number" value={BLEED_MM} disabled title="Fijo en todo el sistema" /></label>
+        <label class="f"><span>Margen seguridad</span><input type="number" step="0.5" min="0" value={project.card.safe ?? 0} onchange={(e) => setCard('safe', e)} /></label>
       </div>
       <p class="hint">
-        Medidas en mm. Exportando a 300 ppp: {Math.round(((project.card.width + 2 * project.card.bleed) * 300) / 25.4)} ×
-        {Math.round(((project.card.height + 2 * project.card.bleed) * 300) / 25.4)} px.
+        Medidas del corte en mm. El sangrado es fijo de {BLEED_MM} mm por lado. La franja entre el corte y el margen de
+        seguridad es la <strong>zona peligrosa</strong>: los textos no deben entrar en ella.<br />
+        Exportando a 300 ppp: {px300.width} × {px300.height} px ({px300.trimWidth} × {px300.trimHeight} al corte + {px300.bleed} px de
+        sangrado por lado).
       </p>
     </div>
   </section>

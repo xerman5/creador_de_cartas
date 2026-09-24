@@ -9,12 +9,11 @@ export interface Rect {
   h: Mm;
 }
 
+/** Tamaño del corte. El sangrado es fijo (`BLEED_MM`). */
 export interface CardSize {
   width: Mm;
   height: Mm;
-  /** Sangrado añadido por cada lado al exportar. */
-  bleed: Mm;
-  /** Margen de seguridad (solo guía visual). */
+  /** Margen de seguridad: entre él y el corte está la zona peligrosa. */
   safe?: Mm;
 }
 

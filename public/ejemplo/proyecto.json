@@ -2,7 +2,7 @@
   "name": "Ejemplo — Naves del Vacío",
   "csv": "cartas.csv",
   "assetsDir": "assets",
-  "card": { "width": 63, "height": 88, "bleed": 3, "safe": 3 },
+  "card": { "width": 63, "height": 88, "safe": 3 },
   "fonts": [],
 
   "attributes": {
@@ -37,12 +37,12 @@
           "rect": { "x": 3, "y": 56, "w": 57, "h": 19 }, "padding": 2.5, "align": "justify", "valign": "middle", "minSize": 5, "lineHeight": 1.2,
           "font": { "family": "Georgia, serif", "size": 7.5, "color": "#2a2118" } },
         { "id": "bloque 2", "type": "image", "bind": "bloque 2", "default": "marcos/bloque-sabor.svg", "fit": "stretch",
-          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 } },
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 6.2 } },
         { "id": "sabor", "type": "text", "bind": "sabor",
-          "rect": { "x": 3, "y": 76, "w": 57, "h": 9 }, "padding": 1.5, "align": "center", "valign": "middle", "minSize": 5,
+          "rect": { "x": 3, "y": 76, "w": 57, "h": 6.2 }, "padding": 1.5, "align": "center", "valign": "middle", "minSize": 5,
           "font": { "family": "Georgia, serif", "size": 6.5, "style": "italic", "color": "#3b2f22" } },
         { "id": "extra", "type": "text", "bind": "extra",
-          "rect": { "x": 3, "y": 85.2, "w": 57, "h": 2.6 }, "align": "right", "valign": "middle",
+          "rect": { "x": 3, "y": 82.4, "w": 57, "h": 2.6 }, "align": "right", "valign": "middle",
           "font": { "family": "Georgia, serif", "size": 4.5, "color": "#c8d4e6" } }
       ]
     },

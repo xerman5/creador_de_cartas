@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { placeholderRow, cardSizeFor, ZONE_COLORS } from '../core/render';
+  import { BLEED_MM, cardSizeFor, safeAreaIssues } from '../core/card';
+  import { GUIDE_COLORS, placeholderRow, ZONE_COLORS } from '../core/render';
   import { normalizeKey } from '../core/text';
   import type { Zone, ZoneType } from '../core/types';
   import { newZone, uniqueId, ZONE_LABELS } from '../core/zones';
@@ -47,13 +48,16 @@
   let viewH = $state(600);
   const size = $derived(cardSizeFor(project, tpl));
   const fitPxPerMm = $derived(
-    Math.max(2, Math.min((viewW - 48) / (size.width + 2 * size.bleed), (viewH - 48) / (size.height + 2 * size.bleed))),
+    Math.max(2, Math.min((viewW - 48) / (size.width + 2 * BLEED_MM), (viewH - 48) / (size.height + 2 * BLEED_MM))),
   );
   const pxPerMm = $derived(zoom ?? fitPxPerMm);
 
   let grid = $state(0.5);
   let showGuides = $state(true);
-  let warnings = $state<string[]>([]);
+  let renderWarnings = $state<string[]>([]);
+  const safeIssues = $derived(tpl ? safeAreaIssues(tpl, size) : []);
+  const unsafe = $derived(new Set(safeIssues.map((i) => i.index)));
+  const warnings = $derived([...safeIssues.map((i) => i.message), ...renderWarnings]);
 
   function selectTipo(t: string) {
     chosenTipo = t;
@@ -259,7 +263,7 @@
 
       <div class="viewport" bind:clientWidth={viewW} bind:clientHeight={viewH}>
         <div class="canvas-wrap">
-          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} bind:selected={selectedRaw} onwarnings={(w) => (warnings = w)} />
+          <Stage {ws} {tipo} row={previewRow} {pxPerMm} {grid} {showGuides} {unsafe} bind:selected={selectedRaw} onwarnings={(w) => (renderWarnings = w)} />
         </div>
       </div>
 
@@ -268,7 +272,12 @@
           {@const r = tpl.zones[selected].rect}
           <span>x {r.x} · y {r.y} · {r.w} × {r.h} mm</span>
         {:else}
-          <span>{size.width} × {size.height} mm + {size.bleed} mm de sangrado</span>
+          <span>{size.width} × {size.height} mm</span>
+          <span class="legend">
+            <i style:background={GUIDE_COLORS.bleed}></i>sangrado {BLEED_MM} mm
+            <i style:background={GUIDE_COLORS.danger}></i>zona peligrosa {size.safe ?? 0} mm
+            <i class="line" style:border-color={GUIDE_COLORS.safe}></i>margen de seguridad
+          </span>
         {/if}
         <span class="muted">Arrastra para mover · Alt: sin imanes · Flechas: mover (Mayús ×10) · Supr: borrar · ⌘D: duplicar</span>
         {#if warnings.length}
@@ -519,6 +528,24 @@
   }
   .muted {
     color: var(--muted);
+  }
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--muted);
+  }
+  .legend i {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    margin-left: 6px;
+  }
+  .legend i.line {
+    height: 0;
+    border-top: 2px dashed;
+    border-radius: 0;
   }
   .warn {
     color: var(--warn);

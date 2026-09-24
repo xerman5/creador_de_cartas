@@ -1,4 +1,5 @@
 import { AssetStore, type FileSource } from './assets';
+import { BLEED_MM, cardSizeFor, DEFAULT_SAFE_MM, safeAreaIssues } from './card';
 import { detectLangs, parseCsv } from './csv';
 import { normalizeKey, readText } from './text';
 import type { AttributeDef, CardRow, Project, Template } from './types';
@@ -34,11 +35,18 @@ function normalizeProject(raw: any, errors: string[]): Project {
     templates[normalizeKey(k)] = v;
   }
 
+  const card = { width: 63, height: 88, safe: DEFAULT_SAFE_MM, ...raw.card };
+  if ('bleed' in card) {
+    if (card.bleed !== BLEED_MM) errors.push(`El sangrado es fijo de ${BLEED_MM} mm: se ignora «bleed: ${card.bleed}».`);
+    delete card.bleed;
+  }
+  for (const tpl of Object.values(templates)) delete (tpl.size as any)?.bleed;
+
   return {
     name: raw.name ?? 'Sin nombre',
     csv: raw.csv ?? 'cartas.csv',
     assetsDir: raw.assetsDir ?? 'assets',
-    card: { width: 63, height: 88, bleed: 3, safe: 3, ...raw.card },
+    card,
     fonts: raw.fonts ?? [],
     attributes,
     templates,
@@ -82,6 +90,9 @@ export function projectIssues(lp: LoadedProject): string[] {
   for (const tipo of new Set(lp.rows.map((r) => normalizeKey(r.tipo ?? '')))) {
     if (!lp.project.templates[tipo]) issues.push(`El tipo «${tipo}» no tiene plantilla.`);
   }
+  for (const [tipo, tpl] of Object.entries(lp.project.templates)) {
+    for (const issue of safeAreaIssues(tpl, cardSizeFor(lp.project, tpl))) issues.push(`Plantilla «${tipo}»: ${issue.message}.`);
+  }
   return issues;
 }
 
@@ -121,7 +132,7 @@ export function defaultProject(name: string): Project {
     name,
     csv: 'cartas.csv',
     assetsDir: 'assets',
-    card: { width: 63, height: 88, bleed: 3, safe: 3 },
+    card: { width: 63, height: 88, safe: DEFAULT_SAFE_MM },
     fonts: [],
     attributes: {},
     templates: {

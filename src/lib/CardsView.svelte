@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { BLEED_MM } from '../core/card';
   import { downloadBlob, exportZip, slug, type ExportFormat } from '../core/export';
   import { projectIssues } from '../core/project';
   import type { RenderOptions } from '../core/render';
@@ -28,7 +29,7 @@
 
   const previewOpts = $derived.by<RenderOptions>(() => {
     const card = lp.project.card;
-    const widthMm = card.width + (showBleed ? 2 * card.bleed : 0);
+    const widthMm = card.width + (showBleed ? 2 * BLEED_MM : 0);
     const dpi = (SIZES[thumb] * (window.devicePixelRatio || 1) * 25.4) / widthMm;
     return { dpi, lang: ws.lang, bleed: showBleed, guides: showGuides, zones: showZones };
   });
@@ -84,7 +85,7 @@
       <h3>{lp.project.name}</h3>
       <p class="muted">
         {ws.source?.label} · {lp.rows.length} cartas<br />
-        {lp.project.card.width}×{lp.project.card.height} mm + {lp.project.card.bleed} mm de sangrado
+        {lp.project.card.width}×{lp.project.card.height} mm + {BLEED_MM} mm de sangrado
       </p>
     </section>
 
@@ -114,7 +115,7 @@
     <section>
       <h4>Vista</h4>
       <label class="check"><input type="checkbox" bind:checked={showBleed} /> Mostrar sangrado</label>
-      <label class="check"><input type="checkbox" bind:checked={showGuides} /> Guías de corte y seguridad</label>
+      <label class="check"><input type="checkbox" bind:checked={showGuides} /> Corte, zona peligrosa y seguridad</label>
       <label class="check"><input type="checkbox" bind:checked={showZones} /> Contorno de zonas</label>
       <div class="seg">
         {#each Object.keys(SIZES) as s}

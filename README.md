@@ -1,6 +1,6 @@
 # Creador de cartas
 
-Genera cartas a partir de un CSV y de plantillas (una por `tipo`). Exporta PNG/JPG a tamaño completo con sangrado y con los ppp escritos en el archivo.
+Genera cartas a partir de un CSV y de plantillas (una por `tipo`). Exporta PNG/JPG a tamaño completo con sangrado y con los ppp escritos en el archivo. Todo corre en el navegador: nada se sube a ningún servidor.
 
 ```bash
 npm install
@@ -14,7 +14,7 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 
 ## Flujo de trabajo
 
-1. **Proyecto**: tamaño de carta, sangrado, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
+1. **Proyecto**: tamaño de carta, margen de seguridad, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
 2. **Plantillas**: la anatomía de cada tipo. Añade zonas (imagen, texto, atributo fijo, lista de atributos), muévelas y redimensiónalas sobre la carta con imanes a bordes, centros y otras zonas. Las propiedades se editan a la derecha. Vista previa con cualquier carta del CSV o con datos de ejemplo.
 3. **Cartas**: todas las cartas generadas, avisos y exportación.
 
@@ -68,7 +68,7 @@ fuerza:3 | velocidad:5 | vida:10
   "name": "Mi juego",
   "csv": "cartas.csv",
   "assetsDir": "assets",
-  "card": { "width": 63, "height": 88, "bleed": 3, "safe": 3 },   // mm
+  "card": { "width": 63, "height": 88, "safe": 3 },   // mm, tamaño al corte
   "fonts": [{ "family": "Cinzel", "file": "fuentes/Cinzel-Bold.ttf", "weight": "bold" }],
   "attributes": {
     "fuerza": { "icon": "iconos/fuerza.svg", "label": "Fuerza" }
@@ -83,6 +83,12 @@ fuerza:3 | velocidad:5 | vida:10
 ```
 
 Coordenadas en mm desde la esquina del **corte** (el sangrado queda en negativo).
+
+## Sangrado y zonas de impresión
+
+- **Sangrado fijo de 3 mm** por lado, siempre incluido al exportar. Si la imprenta pide menos, se recorta después.
+- **Zona peligrosa**: la franja entre el corte y el margen de seguridad (`safe`, 3 mm por defecto). Los textos y atributos que entran en ella generan un aviso y se marcan en rojo en el editor; las imágenes no cuentan (fondos y marcos llegan al borde a propósito).
+- **Píxeles exactos**: `ancho = round(ancho_mm · ppp / 25,4) + 2 · round(3 · ppp / 25,4)`. El corte cae en un píxel entero y el sangrado es idéntico en los cuatro lados (póker a 300 ppp: 744 × 1039 + 35 px por lado = 814 × 1109 px).
 
 ### Zonas
 
@@ -103,6 +109,7 @@ Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que toca
 ```
 src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   types.ts        modelo de datos
+  card.ts         sangrado fijo, píxeles exactos, zona peligrosa
   zones.ts        zonas nuevas por defecto, tamaños de carta
   geometry.ts     arrastre, redimensionado e imanes
   project.ts      carga de proyecto.json + CSV

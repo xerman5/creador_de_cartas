@@ -1,6 +1,7 @@
 <script lang="ts">
   import { dragRect, snapTargets, type Guide, type Handle } from '../core/geometry';
-  import { cardSizeFor, ZONE_COLORS } from '../core/render';
+  import { BLEED_MM, cardSizeFor } from '../core/card';
+  import { ZONE_COLORS } from '../core/render';
   import type { CardRow } from '../core/types';
   import CardView from './CardView.svelte';
   import type { Workspace } from './workspace.svelte';
@@ -12,6 +13,7 @@
     pxPerMm,
     grid,
     showGuides,
+    unsafe,
     selected = $bindable(),
     onwarnings,
   }: {
@@ -22,6 +24,8 @@
     pxPerMm: number;
     grid: number;
     showGuides: boolean;
+    /** Zonas que entran en la zona peligrosa. */
+    unsafe: Set<number>;
     selected: number | null;
     onwarnings: (w: string[]) => void;
   } = $props();
@@ -32,7 +36,7 @@
   const lp = $derived(ws.lp!);
   const tpl = $derived(lp.project.templates[tipo]);
   const size = $derived(cardSizeFor(lp.project, tpl));
-  const b = $derived(size.bleed);
+  const b = BLEED_MM;
   const width = $derived((size.width + 2 * b) * pxPerMm);
   const height = $derived((size.height + 2 * b) * pxPerMm);
   const opts = $derived({
@@ -100,6 +104,7 @@
         class:selected={selected === i}
         class:hidden={zone.hidden}
         class:locked={zone.locked}
+        class:unsafe={unsafe.has(i)}
         style:--c={ZONE_COLORS[zone.type]}
         style:left="{px(zone.rect.x)}px"
         style:top="{px(zone.rect.y)}px"
@@ -151,6 +156,14 @@
   .zone.selected {
     outline: 2px solid var(--c);
     z-index: 2;
+  }
+  .zone.unsafe {
+    outline: 2px solid #ff3b30;
+  }
+  .zone.unsafe .label {
+    background: #ff3b30;
+    color: #fff;
+    opacity: 1;
   }
   .zone.hidden {
     opacity: 0.4;

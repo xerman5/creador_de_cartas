@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { dragRect, snapTargets } from './geometry';
 import type { Zone } from './types';
 
-const size = { width: 63, height: 88, bleed: 3, safe: 3 };
+const size = { width: 63, height: 88, safe: 3 };
 const zone = (x: number, y: number, w: number, h: number): Zone => ({
   id: 'z',
   type: 'image',
