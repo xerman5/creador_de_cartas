@@ -5,6 +5,7 @@ export const ZONE_LABELS: Record<ZoneType, string> = {
   text: 'Texto',
   attributes: 'Lista de atributos',
   attribute: 'Atributo fijo',
+  shape: 'Forma',
 };
 
 export const CARD_PRESETS: { name: string; width: number; height: number }[] = [
@@ -68,6 +69,15 @@ export function newZone(type: ZoneType, project: Project, size: CardSize, taken:
         valuePosition: 'over',
         font: { ...VALUE_FONT },
         rect: { x: 3, y: 15, w: 10, h: 40 },
+      };
+    case 'shape':
+      return {
+        id: uniqueId('forma', taken),
+        type,
+        shape: 'rect',
+        fill: '#2f5d8a',
+        radius: 1.5,
+        rect: centered(30, 10),
       };
     case 'attribute': {
       const key = Object.keys(project.attributes)[0] ?? '';

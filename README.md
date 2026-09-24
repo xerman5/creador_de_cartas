@@ -74,6 +74,7 @@ fuerza:3 | velocidad:5 | vida:10
   "attributes": {
     "fuerza": { "icon": "iconos/fuerza.svg", "label": "Fuerza" }
   },
+  "colors": { "comun": "#9aa7b8", "legendaria": "#f0b429" },
   "templates": {
     "nave": {                       // = valor de la columna tipo
       "size": { "height": 120 },    // opcional: otro tamaño para este tipo
@@ -139,13 +140,19 @@ Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que toca
 
 **image**: `bind` (columna), `default` (ruta), `fit`: `cover` | `contain` | `stretch`.
 
-**text**: `bind`, `default`, `font`, `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
+**text**: `bind`, `default`, `font`, `colorBind` (columna con el color del texto de cada carta), `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
 
 **attribute** (atributo fijo): `key` (clave del catálogo), `icon` (opcional, sustituye al del catálogo), `valuePosition`: `over` | `after` | `below` | `none`, `showIfMissing`, `font`. Se dibuja solo si la carta tiene ese atributo.
 
 **attributes** (lista): `bind` (por defecto `atributos`), `direction`: `column` | `row`, `align`: `start` | `center` | `end`, `iconSize` (mm), `gap` (mm), `valuePosition`: `over` | `after` | `below`, `font`, `keys` (opcional: solo estos atributos, para repartirlos entre dos laterales).
 
+**shape** (forma): `shape`: `rect` | `ellipse`, `fill` y `stroke` (color fijo o nombre de la paleta), `fillBind` y `strokeBind` (columna con el color de cada carta; `-` en la celda lo quita), `strokeWidth` (mm, se dibuja por dentro de la zona), `radius` (mm, esquinas), `opacity` (0–1). Para cintas, fondos de texto, gemas de rareza…
+
 **font**: `family`, `size` (pt), `weight`, `style` (`italic`), `color`, `strokeColor`, `strokeWidth` (mm, contorno para leer sobre ilustraciones).
+
+### Colores
+
+Cualquier color admite un **nombre de la paleta** del proyecto (`"colors": { "fuego": "#c33", "legendaria": "#f0b429" }`) o un color CSS (`#c33`, `rgb(…)`, `crimson`). Con `fillBind`/`strokeBind`/`colorBind`, la celda del CSV decide el color de cada carta: una columna `rareza` con `legendaria` pinta de dorado. Un color que no se entiende genera un aviso.
 
 ## Código
 
@@ -159,6 +166,7 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   csv.ts          lectura del CSV, idiomas
   attributes.ts   sintaxis de atributos
   condition.ts    condiciones de las zonas (showIf)
+  color.ts        paleta y colores desde el CSV
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip

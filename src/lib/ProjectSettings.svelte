@@ -87,6 +87,30 @@
     ws.update((p) => delete p.attributes[key]);
   }
 
+  // ------------------------------------------------------------ paleta
+
+  const palette = $derived(Object.entries(project.colors ?? {}));
+
+  function addColor() {
+    const taken = Object.keys(project.colors ?? {});
+    let n = taken.length + 1;
+    while (taken.includes(`color ${n}`)) n++;
+    ws.update((p) => (p.colors = { ...p.colors, [`color ${n}`]: '#2f5d8a' }));
+  }
+
+  function renameColor(oldKey: string, name: string) {
+    const key = normalizeKey(name);
+    if (!key || key === oldKey || project.colors?.[key]) return;
+    ws.update((p) => (p.colors = Object.fromEntries(Object.entries(p.colors ?? {}).map(([k, v]) => [k === oldKey ? key : k, v]))));
+  }
+
+  function deleteColor(key: string) {
+    ws.update((p) => {
+      const { [key]: _, ...rest } = p.colors ?? {};
+      p.colors = Object.keys(rest).length ? rest : undefined;
+    });
+  }
+
   // ------------------------------------------------------------ CSV
 
   /** Descarga el CSV actual con las columnas que faltan añadidas (vacías). */
@@ -210,7 +234,41 @@
 
   <section>
     <div class="head">
-      <h2>5 · Fuentes</h2>
+      <h2>5 · Colores</h2>
+      <button class="small" onclick={addColor}>＋ Color</button>
+    </div>
+    {#if palette.length}
+      <table>
+        <thead><tr><th>Nombre</th><th>Color</th><th></th></tr></thead>
+        <tbody>
+          {#each palette as [key, value] (key)}
+            <tr>
+              <td><input class="key" type="text" value={key} onchange={(e) => renameColor(key, str(e))} /></td>
+              <td class="color-cell">
+                <input
+                  type="color"
+                  value={/^#[0-9a-f]{6}$/i.test(value) ? value : '#000000'}
+                  oninput={(e) => set(`color/${key}`, (p) => (p.colors![key] = str(e)))}
+                />
+                <input type="text" value={value} onchange={(e) => set(`color/${key}`, (p) => (p.colors![key] = str(e).trim()))} />
+              </td>
+              <td><button class="small danger" onclick={() => deleteColor(key)}>✕</button></td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      <p class="muted">Aún no hay colores con nombre.</p>
+    {/if}
+    <p class="hint">
+      Úsalos por nombre en las plantillas y en el CSV: una columna <code>rareza</code> con <code>legendaria</code> pinta la forma o
+      el texto vinculado con ese color.
+    </p>
+  </section>
+
+  <section>
+    <div class="head">
+      <h2>6 · Fuentes</h2>
       <button class="small" onclick={() => ws.update((p) => p.fonts.push({ family: 'Mi fuente', file: 'fuentes/' }))}>＋ Fuente</button>
     </div>
     {#if project.fonts.length}
@@ -244,7 +302,7 @@
   </section>
 
   <section>
-    <h2>6 · Columnas del CSV</h2>
+    <h2>7 · Columnas del CSV</h2>
     {#if missing.size}
       <p>Las plantillas usan columnas que el CSV no tiene:</p>
       <ul class="cols">
@@ -328,6 +386,15 @@
   }
   .key {
     font-family: ui-monospace, monospace;
+  }
+  .color-cell {
+    display: flex;
+    gap: 6px;
+  }
+  .color-cell input[type='color'] {
+    width: 34px;
+    flex: none;
+    padding: 1px;
   }
   .icon-cell {
     min-width: 260px;

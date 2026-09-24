@@ -54,6 +54,8 @@ export interface TextZone extends ZoneBase {
   type: 'text';
   /** Columna del CSV. Si existe `<bind>-<idioma>` se usa esa. */
   bind: string;
+  /** Columna del CSV con el color del texto (sustituye a `font.color`). */
+  colorBind?: string;
   default?: string;
   font: FontSpec;
   align?: 'left' | 'center' | 'right' | 'justify';
@@ -94,7 +96,24 @@ export interface AttributeZone extends ZoneBase {
   font: FontSpec;
 }
 
-export type Zone = ImageZone | TextZone | AttributesZone | AttributeZone;
+/** Rectángulo (con esquinas redondeadas) o elipse de color: cintas, fondos de texto, gemas de rareza. */
+export interface ShapeZone extends ZoneBase {
+  type: 'shape';
+  shape?: 'rect' | 'ellipse';
+  /** Color fijo o nombre de la paleta del proyecto. */
+  fill?: string;
+  /** Columna del CSV con el color de relleno (sustituye a `fill`; «-» = sin relleno). */
+  fillBind?: string;
+  stroke?: string;
+  strokeBind?: string;
+  strokeWidth?: Mm;
+  /** Radio de las esquinas (solo rectángulos). */
+  radius?: Mm;
+  /** 0–1. */
+  opacity?: number;
+}
+
+export type Zone = ImageZone | TextZone | AttributesZone | AttributeZone | ShapeZone;
 export type ZoneType = Zone['type'];
 
 export interface Template {
@@ -133,6 +152,8 @@ export interface Project {
   fonts: FontFile[];
   attributes: Record<string, AttributeDef>;
   templates: Record<string, Template>;
+  /** Colores con nombre: se usan en plantillas y en el CSV («fuego», «legendaria»). */
+  colors?: Record<string, string>;
   export?: Partial<ExportSettings>;
 }
 

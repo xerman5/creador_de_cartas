@@ -42,13 +42,13 @@ const fmt = (mm: number) => mm.toLocaleString('es', { maximumFractionDigits: 1 }
 /**
  * Zonas de contenido (textos y atributos) que entran en la zona peligrosa, la franja
  * entre el corte y el margen de seguridad donde la cuchilla puede desviarse.
- * Las imágenes no cuentan: fondos y marcos suelen llegar al borde a propósito.
+ * Imágenes y formas no cuentan: fondos y marcos suelen llegar al borde a propósito.
  */
 export function safeAreaIssues(tpl: Template, size: CardSize): SafeAreaIssue[] {
   const s = size.safe ?? 0;
   const issues: SafeAreaIssue[] = [];
   tpl.zones.forEach((z, index) => {
-    if (z.hidden || z.type === 'image') return;
+    if (z.hidden || z.type === 'image' || z.type === 'shape') return;
     const pad = z.type === 'text' ? (z.padding ?? 0) : 0;
     const r: Rect = { x: z.rect.x + pad, y: z.rect.y + pad, w: z.rect.w - 2 * pad, h: z.rect.h - 2 * pad };
     const overflow = Math.max(s - r.x, s - r.y, r.x + r.w - (size.width - s), r.y + r.h - (size.height - s));

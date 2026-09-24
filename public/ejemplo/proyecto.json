@@ -15,6 +15,12 @@
     "coste":       { "icon": "iconos/coste.svg",       "label": "Coste" }
   },
 
+  "colors": {
+    "común":      "#9aa7b8",
+    "rara":       "#3d8fe0",
+    "legendaria": "#f0b429"
+  },
+
   "templates": {
     "nave": {
       "back": "D01",
@@ -26,6 +32,8 @@
         { "id": "titulo", "type": "text", "bind": "titulo",
           "rect": { "x": 5, "y": 3, "w": 53, "h": 10 }, "align": "center", "valign": "middle", "minSize": 7,
           "font": { "family": "Georgia, serif", "size": 11, "weight": "bold", "color": "#ffffff", "strokeColor": "#0b1a33", "strokeWidth": 0.25 } },
+        { "id": "gema rareza", "type": "shape", "shape": "ellipse", "fillBind": "rareza", "showIf": "rareza",
+          "stroke": "#0b1a33", "strokeWidth": 0.35, "rect": { "x": 54, "y": 6, "w": 4, "h": 4 } },
         { "id": "lateral izquierdo", "type": "image", "bind": "lateral izquierdo", "default": "marcos/lateral.svg", "fit": "stretch",
           "rect": { "x": 3, "y": 15, "w": 12, "h": 40 } },
         { "id": "atributos", "type": "attributes", "bind": "atributos",
