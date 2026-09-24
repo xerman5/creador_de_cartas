@@ -1,5 +1,6 @@
 import { parseAttributes } from './attributes';
 import { cardPixels, cardSizeFor, type CardPixels } from './card';
+import { conditionMatches } from './condition';
 import type { LoadedProject } from './project';
 import { getField, normalizeKey } from './text';
 import type {
@@ -78,7 +79,7 @@ export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOp
   }
 
   for (const zone of tpl.zones) {
-    if (zone.hidden) continue;
+    if (zone.hidden || !conditionMatches(zone.showIf, row, opts.lang)) continue;
     ctx.save();
     try {
       if (zone.type === 'image') await drawImageZone(rc, zone);

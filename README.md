@@ -128,6 +128,15 @@ Se puede cancelar en cualquier momento.
 
 Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que tocan el borde de la carta se extienden hasta el sangrado; úsalo en el fondo), `hidden`, `locked` (no se selecciona con el ratón en el editor).
 
+`showIf` (opcional): la zona solo se dibuja en las cartas que cumplen la condición. En el editor, las zonas que no se dibujan en la carta de vista previa aparecen rayadas.
+
+| `showIf` | Se dibuja si |
+|---|---|
+| `rareza` | la columna tiene valor |
+| `!rareza` | la columna está vacía |
+| `rareza=legendaria` | vale eso (sin distinguir mayúsculas ni tildes); `legendaria\|épica` = cualquiera |
+| `rareza!=común` | vale otra cosa o está vacía |
+
 **image**: `bind` (columna), `default` (ruta), `fit`: `cover` | `contain` | `stretch`.
 
 **text**: `bind`, `default`, `font`, `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
@@ -149,6 +158,7 @@ src/core/     lógica sin interfaz (se podría pasar a WASM sin tocar la UI)
   project.ts      carga de proyecto.json + CSV
   csv.ts          lectura del CSV, idiomas
   attributes.ts   sintaxis de atributos
+  condition.ts    condiciones de las zonas (showIf)
   render.ts       dibujo de una carta en canvas
   deck.ts         traseras, copias y qué se exporta
   export.ts       PNG/JPG, nombres de archivo, manifiesto y zip

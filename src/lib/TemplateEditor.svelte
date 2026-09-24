@@ -236,6 +236,7 @@
               <button class="item" onclick={() => (selectedRaw = i)}>
                 <span class="dot" style:background={ZONE_COLORS[z.type]}></span>
                 <span class="name">{z.id}</span>
+                {#if z.showIf}<small class="cond" title="Solo si: {z.showIf}">si</small>{/if}
               </button>
               <span class="tools">
                 <button class="icon" title={z.hidden ? 'Mostrar' : 'Ocultar'} onclick={() => toggle(i, 'hidden')}>{z.hidden ? '◌' : '●'}</button>
@@ -462,6 +463,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .cond {
+    flex: none;
+    font-size: 9px;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: #2b2f38;
+    color: var(--muted);
   }
   .dot {
     flex: none !important;

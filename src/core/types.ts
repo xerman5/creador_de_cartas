@@ -38,6 +38,8 @@ interface ZoneBase {
   hidden?: boolean;
   /** No se puede seleccionar con el ratón en el editor. */
   locked?: boolean;
+  /** Solo se dibuja si la carta cumple la condición (ver `parseCondition`): «rareza=legendaria». */
+  showIf?: string;
 }
 
 export interface ImageZone extends ZoneBase {

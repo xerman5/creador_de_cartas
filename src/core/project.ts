@@ -1,5 +1,6 @@
 import { AssetStore, type FileSource } from './assets';
 import { BLEED_MM, cardSizeFor, DEFAULT_SAFE_MM, safeAreaIssues } from './card';
+import { parseCondition } from './condition';
 import { detectLangs, parseCsv } from './csv';
 import { normalizeKey, readText } from './text';
 import type { AttributeDef, CardRow, Project, Template } from './types';
@@ -117,8 +118,10 @@ export interface TemplateColumn {
 export function templateColumns(tpl: Template): TemplateColumn[] {
   const cols = new Map<string, boolean>();
   for (const z of tpl.zones) {
+    const cond = parseCondition(z.showIf ?? '');
+    if (cond && !cols.has(cond.column)) cols.set(cond.column, false);
     const bind = z.type === 'attributes' || z.type === 'attribute' ? (z.bind ?? 'atributos') : z.bind;
-    if (bind) cols.set(normalizeKey(bind), z.type === 'text');
+    if (bind) cols.set(normalizeKey(bind), z.type === 'text' || !!cols.get(normalizeKey(bind)));
   }
   return [...cols].map(([name, localized]) => ({ name, localized }));
 }

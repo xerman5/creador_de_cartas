@@ -157,6 +157,19 @@
     <input type="checkbox" checked={!!zone.bleed} onchange={(e) => edit('bleed', (z) => (z.bleed = e.currentTarget.checked || undefined))} />
     Extender al sangrado
   </label>
+  <label class="f">
+    <span>Mostrar solo si</span>
+    <input
+      type="text"
+      list="csv-columns"
+      value={zone.showIf ?? ''}
+      placeholder="siempre"
+      onchange={(e) => edit('showIf', (z) => (z.showIf = str(e).trim() || undefined))}
+    />
+  </label>
+  {#if zone.showIf}
+    <p class="hint"><code>col</code> con valor · <code>!col</code> vacía · <code>col=a|b</code> igual a · <code>col!=a</code> distinta</p>
+  {/if}
 
   {#if zone.type === 'image'}
     <h4>Imagen</h4>
