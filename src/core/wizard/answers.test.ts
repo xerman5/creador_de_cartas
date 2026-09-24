@@ -32,3 +32,15 @@ describe('resolvedType', () => {
     expect(() => resolvedType(a, a.types[0])).not.toThrow();
   });
 });
+
+describe('orden de los atributos', () => {
+  it('se dibujan en el orden de la lista del juego, no en el que se marcaron', () => {
+    const a = answers();
+    a.attributes = [
+      { label: 'Vida', color: '#0f0' },
+      { label: 'Ataque', color: '#f00' },
+    ];
+    a.types[0].attributes = ['ataque', 'vida'];
+    expect(resolvedType(a, a.types[0]).attributes).toEqual(['vida', 'ataque']);
+  });
+});
