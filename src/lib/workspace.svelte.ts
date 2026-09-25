@@ -191,8 +191,19 @@ export class Workspace {
     }
   }
 
-  /** Añade archivos a un estante de la biblioteca sin pisar los que ya hay; devuelve sus rutas. */
-  async addResources(files: File[], shelf: ResourceDir): Promise<string[]> {
+  #adding: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Añade archivos a un estante de la biblioteca sin pisar los que ya hay; devuelve sus rutas.
+   * Las llamadas van en fila: dos seguidas con el mismo nombre no se pisan entre sí.
+   */
+  addResources(files: File[], shelf: ResourceDir): Promise<string[]> {
+    const run = this.#adding.then(() => this.#addResources(files, shelf));
+    this.#adding = run.catch(() => undefined);
+    return run;
+  }
+
+  async #addResources(files: File[], shelf: ResourceDir): Promise<string[]> {
     const lp = this.lp;
     if (!lp || !this.source?.write) return [];
     const taken = new Set(this.assetFiles);
