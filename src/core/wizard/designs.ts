@@ -102,7 +102,7 @@ class Layout {
   }
 
   private art(r: Rect, bleed = false) {
-    const z: ImageZone = { id: 'ilustracion', type: 'image', bind: 'ilustracion', default: artPath(this.inp.tipo), fit: 'cover', rect: r };
+    const z: ImageZone = { id: 'ilustracion', type: 'image', bind: 'ilustracion', cropBind: 'encuadre', default: artPath(this.inp.tipo), fit: 'cover', rect: r };
     if (bleed) z.bleed = true;
     this.zones.push(z);
     if (!bleed) this.shape('marco ilustracion', r, undefined, { stroke: 'acento', strokeWidth: r2(0.35 * this.f) });

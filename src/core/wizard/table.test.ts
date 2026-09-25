@@ -19,14 +19,14 @@ function game(overrides: Partial<WizardAnswers> = {}): WizardAnswers {
 describe('tableColumns', () => {
   it('solo las columnas que usa el tipo, con los atributos por separado', () => {
     const a = game();
-    expect(tableColumns(a, [a.types[0]]).map((c) => c.key)).toEqual(['id', 'titulo', 'descripcion', 'coste', 'attr:ataque', 'attr:vida', 'variante', 'ilustracion', 'copias']);
-    expect(tableColumns(a, [a.types[1]]).map((c) => c.key)).toEqual(['id', 'titulo', 'sabor', 'ilustracion', 'copias']);
+    expect(tableColumns(a, [a.types[0]]).map((c) => c.key)).toEqual(['id', 'titulo', 'descripcion', 'coste', 'attr:ataque', 'attr:vida', 'variante', 'ilustracion', 'encuadre', 'copias']);
+    expect(tableColumns(a, [a.types[1]]).map((c) => c.key)).toEqual(['id', 'titulo', 'sabor', 'ilustracion', 'encuadre', 'copias']);
   });
 
   it('con varios idiomas, una columna por idioma o solo la del idioma pedido', () => {
     const a = game({ langs: ['es', 'en'] });
-    expect(tableColumns(a, [a.types[1]]).map((c) => c.label)).toEqual(['Id', 'Título (es)', 'Título (en)', 'Ambientación (es)', 'Ambientación (en)', 'Ilustración', 'Copias']);
-    expect(tableColumns(a, [a.types[1]], 'en').map((c) => c.key)).toEqual(['id', 'titulo-en', 'sabor-en', 'ilustracion', 'copias']);
+    expect(tableColumns(a, [a.types[1]]).map((c) => c.label)).toEqual(['Id', 'Título (es)', 'Título (en)', 'Ambientación (es)', 'Ambientación (en)', 'Ilustración', 'Encuadre', 'Copias']);
+    expect(tableColumns(a, [a.types[1]], 'en').map((c) => c.key)).toEqual(['id', 'titulo-en', 'sabor-en', 'ilustracion', 'encuadre', 'copias']);
   });
 });
 
@@ -35,7 +35,7 @@ describe('fillCsv + importCsv', () => {
     const a = game();
     a.types[0].cards = [{ titulo: 'Lobos', descripcion: 'Aúllan.', coste: '2', 'attr:ataque': '5', variante: 'Rara', ilustracion: 'lobos.png', copias: '3' }];
     const csv = fillCsv(a);
-    expect(csv.startsWith('﻿id;tipo;titulo;descripcion;sabor;coste;ataque;vida;rareza;ilustracion;copias')).toBe(true);
+    expect(csv.startsWith('﻿id;tipo;titulo;descripcion;sabor;coste;ataque;vida;rareza;ilustracion;encuadre;copias')).toBe(true);
     const { types, report } = importCsv(a, csv);
     expect(report).toEqual({ byType: { Clan: 3, Lugar: 2 }, unknownTypes: [], ignored: [] });
     expect(types[0].cards![0]).toEqual({
@@ -115,7 +115,7 @@ describe('habilidades (solo icono)', () => {
   it('en el proyecto: la habilidad va sin número; las cartas sin rellenar llevan de ejemplo', () => {
     const a = withAbilities();
     a.types[0].cards = [{ titulo: 'Cuervos', 'attr:volar': 'x' }, { titulo: 'Lobos' }];
-    const rows = Papa.parse<Record<string, string>>(buildProject(a).csv, { header: true }).data;
+    const rows = Papa.parse<Record<string, string>>(buildProject(a).csv, { header: true, delimiter: ',' }).data;
     expect(rows[0].atributos).toMatch(/^coste:\d \| ataque:\d \| vida:\d \| volar$/);
     expect(rows[1].atributos).not.toContain('volar');
     // La tercera no tiene nada escrito: ejemplo alterno (carta 3 → sí).

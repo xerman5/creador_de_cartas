@@ -55,7 +55,8 @@ Los diseños se prueban con todas las combinaciones de elementos, tamaños y aju
 1. **Proyecto**: tamaño de carta, margen de seguridad, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
 2. **Recursos**: la biblioteca del proyecto en tres estantes, cada uno una carpeta de `assets/`: **Iconos** (`iconos/`), **Fondos** (`fondos/`: fondos y marcos) e **Ilustraciones** (`ilustraciones/`). Se sueltan archivos o carpetas enteras (nunca se pisa un archivo con el mismo nombre), se borran, y avisa de lo que no usa ninguna carta. Cada campo de imagen del editor tiene un hueco donde soltar un archivo o una miniatura y que, con un clic, abre la biblioteca para elegir. En Plantillas, soltar una imagen sobre una zona de imagen o de atributo la pone como su imagen por defecto o su icono.
 3. **Plantillas**: la anatomía de cada tipo. Añade zonas (imagen, texto, atributo fijo, lista de atributos) **trazando el rectángulo sobre la carta** (o con un clic, a tamaño por defecto); muévelas y redimensiónalas con imanes a bordes, centros, margen de seguridad y otras zonas. Las propiedades se editan a la derecha. Vista previa con cualquier carta del CSV o con datos de ejemplo.
-4. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json`). Solo se dibujan las miniaturas a la vista; el resto se comprueba en segundo plano para que la lista de avisos esté completa.
+4. **Tabla**: el CSV editable dentro de la app, una fila por carta, con la carta seleccionada dibujada al lado. Filtrar por tipo y buscar; añadir, duplicar y quitar cartas (el id nuevo sigue la numeración del tipo: `CRI-004`); añadir columnas. En el panel de la carta, los **atributos** con casillas (sin número = habilidad) y el **encuadre** de cada imagen. Se guarda con ⌘S (conserva cabeceras, separador y saltos de línea del archivo) y se deshace con ⌘Z. Un id repetido se marca en rojo.
+5. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json`). Solo se dibujan las miniaturas a la vista; el resto se comprueba en segundo plano para que la lista de avisos esté completa.
 
 Guardar (⌘S) escribe `proyecto.json` en la carpeta; si el navegador no puede escribir (Safari/Firefox o el ejemplo), lo descarga. ⌘Z / ⇧⌘Z deshacen y rehacen.
 
@@ -78,6 +79,7 @@ Mira [public/ejemplo/](public/ejemplo/) como referencia completa.
 - Las cabeceras ignoran mayúsculas y tildes (`Descripción-ES` = `descripcion-es`).
 - **Idiomas**: `titulo-es`, `titulo-en`… La zona se vincula a `titulo` y el idioma se elige en la barra superior.
 - **Imágenes** (`fondo`, `cabecera`, `bloque 1`…): vacío = la imagen por defecto de la plantilla; una ruta = sustituirla en esta carta; `-` = no dibujar.
+- **encuadre**: qué parte de la imagen se ve en su zona, `30% 40% 1.5` (punto que va al centro y zoom). Vacío = centrada. Se ajusta arrastrando la imagen en la Tabla o en el asistente (paso «Cartas»). La zona de imagen lo lee de la columna que diga su `cropBind`.
 - **trasera**: `id` de otra carta del CSV. Vacía = la trasera por defecto de la plantilla; `-` = sin trasera.
 - **copias**: cuántas copias lleva el mazo (vacía = 1; `0` = no se exporta). No duplica imágenes: va al manifiesto.
 - Separador `,` o `;` (se detecta solo). Codificación UTF-8 recomendada.
@@ -177,7 +179,7 @@ Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que toca
 | `rareza=legendaria` | vale eso (sin distinguir mayúsculas ni tildes); `legendaria\|épica` = cualquiera |
 | `rareza!=común` | vale otra cosa o está vacía |
 
-**image**: `bind` (columna), `default` (ruta), `fit`: `cover` | `contain` | `stretch`.
+**image**: `bind` (columna), `default` (ruta), `fit`: `cover` | `contain` | `stretch`, `cropBind` (columna con el encuadre de cada carta, solo con `cover`).
 
 **text**: `bind`, `default`, `font`, `colorBind` (columna con el color del texto de cada carta), `align`: `left` | `center` | `right` | `justify`, `valign`: `top` | `middle` | `bottom`, `padding` (mm), `lineHeight` (1.2), `minSize` (pt: si el texto no cabe se reduce hasta aquí y, si aun así no cabe, aparece un aviso).
 

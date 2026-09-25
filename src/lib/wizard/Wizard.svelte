@@ -35,6 +35,7 @@
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
+  import CropEditor from '../CropEditor.svelte';
   import {
     backRow,
     clearDraft,
@@ -437,7 +438,23 @@
 
   let lang = $state('');
   const tableLang = $derived(answers.langs.includes(lang) ? lang : answers.langs[0]);
-  const columns = $derived<TableColumn[]>(currentType ? tableColumns(answers, [currentType], tableLang) : []);
+  // El encuadre va en el CSV pero se ajusta arrastrando la imagen, junto a la vista previa.
+  const columns = $derived<TableColumn[]>(currentType ? tableColumns(answers, [currentType], tableLang).filter((c) => c.kind !== 'crop') : []);
+
+  /** Imagen propia de la carta seleccionada y forma de su zona, para encuadrarla. */
+  let cropImage = $state.raw<{ src: string; aspect: number } | null>(null);
+  $effect(() => {
+    const t = currentType;
+    const path = t && focus ? cell(t, row, 'ilustracion') : '';
+    const art = tplZones.find((z) => z.id === 'ilustracion');
+    const lp = preview;
+    if (!path || !art || !lp || art.type !== 'image' || art.bleed) return void (cropImage = null);
+    let cancelled = false;
+    lp.assets.image(path).then((img) => {
+      if (!cancelled) cropImage = img ? { src: img.src, aspect: art.rect.w / art.rect.h } : null;
+    });
+    return () => (cancelled = true);
+  });
   const ids = $derived(cardIds(answers.types));
   let csvInput: HTMLInputElement;
   let importReport = $state<ImportReport | null>(null);
@@ -1355,6 +1372,19 @@
         <small>{previewLabel(currentType?.label)} · carta {row + 1} de {currentType?.count}</small>
         <button class="small" onclick={() => (row = Math.min((currentType?.count ?? 1) - 1, row + 1))} disabled={row >= (currentType?.count ?? 1) - 1}>▶</button>
       </div>
+      {#if cropImage && currentType}
+        <div class="crop-panel">
+          <small>Encuadre de la ilustración: arrastra para mover, la rueda amplía.</small>
+          <CropEditor
+            src={cropImage.src}
+            aspect={cropImage.aspect}
+            value={cell(currentType, row, 'encuadre')}
+            onchange={(v) => setCell(currentType, row, 'encuadre', v)}
+            width={240}
+            label="Encuadre de la ilustración"
+          />
+        </div>
+      {/if}
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
       {@render card(preview, currentType?.label ?? '', stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
@@ -1668,6 +1698,13 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .crop-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
   }
   .dropzone {
     border: 1px dashed var(--border);

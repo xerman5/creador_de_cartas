@@ -2,6 +2,7 @@
   import { DirectorySource, FileListSource, UrlSource, type FileSource } from './core/assets';
   import { DEFAULT_CSV, defaultProject, PROJECT_FILE, serializeProject } from './core/project';
   import CardsView from './lib/CardsView.svelte';
+  import CardTable from './lib/CardTable.svelte';
   import ProjectSettings from './lib/ProjectSettings.svelte';
   import ResourcesView from './lib/ResourcesView.svelte';
   import TemplateEditor from './lib/TemplateEditor.svelte';
@@ -9,12 +10,13 @@
   import { loadResume, type ResumeContext } from './lib/wizard/resume';
   import { Workspace } from './lib/workspace.svelte';
 
-  type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'cartas';
+  type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'tabla' | 'cartas';
   const TABS: [Tab, string][] = [
     ['proyecto', '1 · Proyecto'],
     ['recursos', '2 · Recursos'],
     ['plantillas', '3 · Plantillas'],
-    ['cartas', '4 · Cartas'],
+    ['tabla', '4 · Tabla'],
+    ['cartas', '5 · Cartas'],
   ];
 
   const ws = new Workspace();
@@ -153,7 +155,8 @@
       busy = true;
       try {
         const s = await src.stamp!(paths);
-        if (last && s !== last) await ws.open(src);
+        // Con cambios en la tabla sin guardar no se relee el CSV: se perderían.
+        if (last && s !== last && !ws.rowsDirty) await ws.open(src);
         last = s;
       } finally {
         busy = false;
@@ -207,7 +210,12 @@
     <button class="ghost" onclick={openFolder} disabled={ws.loading}>Abrir…</button>
     <button class="ghost" onclick={openExample} disabled={ws.loading}>Ejemplo</button>
     {#if ws.source}
-      <button class="ghost" onclick={() => ws.source && ws.open(ws.source)} disabled={ws.loading || !canReload} title="Volver a leer CSV e imágenes">⟳</button>
+      <button
+        class="ghost"
+        onclick={() => ws.source && (!ws.rowsDirty || confirm('Hay cambios en la tabla de cartas sin guardar: al volver a leer el CSV se pierden. ¿Seguir?')) && ws.open(ws.source)}
+        disabled={ws.loading || !canReload}
+        title="Volver a leer CSV e imágenes">⟳</button
+      >
       {#if ws.source.stamp}
         <label class="check" title="Recargar al guardar el CSV desde otro programa"><input type="checkbox" bind:checked={autoReload} /> auto</label>
       {/if}
@@ -247,6 +255,8 @@
       <ProjectSettings {ws} onedit={editTemplate} />
     {:else if tab === 'recursos'}
       <ResourcesView {ws} />
+    {:else if tab === 'tabla'}
+      <CardTable {ws} />
     {:else if tab === 'plantillas'}
       {#key editorKey}
         <TemplateEditor {ws} initialTipo={editTipo} />

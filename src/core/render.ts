@@ -2,6 +2,7 @@ import { parseAttributes } from './attributes';
 import { cardPixels, cardSizeFor, type CardPixels } from './card';
 import { pickColor, resolveColor } from './color';
 import { conditionMatches } from './condition';
+import { coverRect, parseCrop } from './crop';
 import type { LoadedProject } from './project';
 import { getField, normalizeKey } from './text';
 import type {
@@ -222,7 +223,18 @@ async function drawImageZone(rc: Ctx, zone: ImageZone) {
   const path = value || zone.default;
   if (!path) return;
   const img = await loadImage(rc, path, zone.id);
-  if (img) drawFit(rc.ctx, img, zonePx(rc, zone), zone.fit ?? 'cover');
+  if (!img) return;
+  const fit = zone.fit ?? 'cover';
+  const crop = zone.cropBind && fit === 'cover' ? getField(rc.row, zone.cropBind, rc.opts.lang) : '';
+  if (!crop) return drawFit(rc.ctx, img, zonePx(rc, zone), fit);
+  const r = zonePx(rc, zone);
+  const d = coverRect(img.naturalWidth || r.w, img.naturalHeight || r.h, r, parseCrop(crop));
+  rc.ctx.save();
+  rc.ctx.beginPath();
+  rc.ctx.rect(r.x, r.y, r.w, r.h);
+  rc.ctx.clip();
+  rc.ctx.drawImage(img, d.x, d.y, d.w, d.h);
+  rc.ctx.restore();
 }
 
 // ---------------------------------------------------------------- zona texto

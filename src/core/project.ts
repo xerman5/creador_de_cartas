@@ -1,7 +1,7 @@
 import { AssetStore, type FileSource } from './assets';
 import { BLEED_MM, cardSizeFor, DEFAULT_SAFE_MM, safeAreaIssues } from './card';
 import { parseCondition } from './condition';
-import { detectLangs, parseCsv } from './csv';
+import { detectLangs, parseCsv, type CsvFormat } from './csv';
 import { normalizeKey, readText } from './text';
 import type { AttributeDef, CardRow, Project, Template } from './types';
 
@@ -15,6 +15,8 @@ export interface LoadedProject {
   assets: AssetStore;
   /** Problemas al leer los archivos (JSON, CSV, fuentes). */
   errors: string[];
+  /** Cómo está escrito el CSV, para guardarlo igual. */
+  csvFormat?: CsvFormat;
 }
 
 const ZONE_TYPES = ['image', 'text', 'attributes', 'attribute', 'shape'];
@@ -84,7 +86,7 @@ export async function loadProject(source: FileSource, keep?: Project): Promise<L
   const assets = new AssetStore(source, project.assetsDir);
   errors.push(...(await assets.loadFonts(project.fonts)));
 
-  return { project, rows: csv.rows, columns: csv.columns, langs: detectLangs(csv.columns), assets, errors };
+  return { project, rows: csv.rows, columns: csv.columns, langs: detectLangs(csv.columns), assets, errors, csvFormat: csv.format };
 }
 
 /** Avisos que dependen del proyecto actual (cambian al editar). */
@@ -131,7 +133,10 @@ export function templateColumns(tpl: Template): TemplateColumn[] {
     } else if (z.type === 'text') {
       add(z.bind, true);
       add(z.colorBind, false);
-    } else add(z.type === 'image' ? z.bind : (z.bind ?? 'atributos'), false);
+    } else if (z.type === 'image') {
+      add(z.bind, false);
+      add(z.cropBind, false);
+    } else add(z.bind ?? 'atributos', false);
   }
   return [...cols].map(([name, localized]) => ({ name, localized }));
 }

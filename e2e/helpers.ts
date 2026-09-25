@@ -89,3 +89,10 @@ export async function startWizard(page: Page, name: string, types: TypeSpec[]) {
 export async function toggleElements(page: Page, labels: string[]) {
   for (const l of labels) await page.locator('.element', { hasText: l }).click();
 }
+
+/** Con SHOTS=1, guarda una captura en test-results/capturas/ (para revisar el aspecto a ojo). */
+export async function shot(page: Page, name: string) {
+  if (!process.env.SHOTS) return;
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `test-results/capturas/${name}.png` });
+}

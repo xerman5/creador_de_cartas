@@ -21,7 +21,7 @@ function created(a = game()) {
   return { built, file, project: structuredClone(built.project), csv: built.csv };
 }
 
-const rows = (csv: string) => Papa.parse<Record<string, string>>(csv, { header: true, skipEmptyLines: true }).data;
+const rows = (csv: string) => Papa.parse<Record<string, string>>(csv, { header: true, delimiter: ',', skipEmptyLines: true }).data;
 
 describe('huellas', () => {
   it('el mismo contenido da la misma huella aunque cambie el orden de las claves', () => {

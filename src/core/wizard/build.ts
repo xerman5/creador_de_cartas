@@ -316,7 +316,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   if (any('flavor')) fields.push(...langs.map((l) => col('sabor', l)));
   if (usesCost || any('stats')) fields.push('atributos');
   if (usesVariant) fields.push(variantCol);
-  if (any('art')) fields.push('ilustracion');
+  if (any('art')) fields.push('ilustracion', 'encuadre');
   if (any('number')) fields.push('numero');
   fields.push('copias');
   if (a.backs === 'per-type') fields.push('color');
@@ -358,6 +358,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       if (r.elements.has('variant') && a.variant.values.length)
         row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;
       if (r.elements.has('art') && own('ilustracion')) row.ilustracion = own('ilustracion');
+      if (r.elements.has('art') && own('encuadre')) row.encuadre = own('encuadre');
       if (own('copias')) row.copias = own('copias');
       if (r.elements.has('number')) row.numero = `${String(serial).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
       rows.push(row);
