@@ -5,9 +5,11 @@
     attrKey,
     ELEMENTS as CONTENT,
     fontStack,
+    hasElement,
     isAbility,
     typeLabel,
     mergeFine,
+    setElement,
     type FineTune,
     type IconStyle,
     type PieceColor,
@@ -133,14 +135,14 @@
 
   /** Tipo que decide el contenido (si este es «igual que» otro, el otro). */
   const src = $derived(contentType(answers, t));
-  const missing = $derived(CONTENT.filter((e) => !src.elements.includes(e.key)));
+  const missing = $derived(CONTENT.filter((e) => !hasElement(src, e.key)));
 
   function addElement(key: ElementKey) {
-    src.elements = [...src.elements, key];
+    setElement(src, key, true);
     if (key === 'stats' && !src.attributes.length) src.attributes = answers.attributes.map(attrKey).filter(Boolean);
   }
   function removeElement(key: ElementKey) {
-    src.elements = src.elements.filter((e) => e !== key);
+    setElement(src, key, false);
   }
   function toggleAttr(key: string, on: boolean) {
     src.attributes = on ? [...src.attributes.filter((k) => k !== key), key] : src.attributes.filter((k) => k !== key);

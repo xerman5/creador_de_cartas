@@ -1,9 +1,10 @@
 import { normalizeKey } from '../text';
 
 /** Lo que puede llevar una carta. El asistente lo pregunta en lenguaje de juego, no de zonas. */
-export type ElementKey = 'art' | 'subtitle' | 'rules' | 'flavor' | 'cost' | 'stats' | 'variant' | 'number';
+export type ElementKey = 'title' | 'art' | 'subtitle' | 'rules' | 'flavor' | 'cost' | 'stats' | 'variant' | 'number';
 
 export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
+  { key: 'title', label: 'Título', hint: 'El nombre de la carta, arriba. Sin él, la carta sigue teniendo nombre en la tabla y en los archivos.' },
   { key: 'art', label: 'Ilustración', hint: 'La imagen principal de la carta.' },
   { key: 'subtitle', label: 'Línea de tipo', hint: 'Un texto corto bajo el título: «Criatura — Dragón».' },
   { key: 'rules', label: 'Texto de reglas', hint: 'Lo que hace la carta. Admite iconos: {ataque}.' },
@@ -30,6 +31,11 @@ export interface TypeAnswer {
   elements: ElementKey[];
   /** Claves de los atributos que usa este tipo (sin el coste). */
   attributes: string[];
+  /**
+   * Sin título dibujado. El título está por defecto (por eso no va en `elements`): la carta sigue teniendo
+   * nombre en la tabla, en la galería y en los archivos exportados.
+   */
+  noTitle?: boolean;
   /** Mismo contenido que otro tipo (su nombre completo, `fullName`): comparte elementos y atributos. */
   sameAs?: string;
   /** Datos de sus cartas, en orden; puede tener menos filas que `count`. */
@@ -47,6 +53,18 @@ export interface AttrAnswer {
   kind?: AttrKind;
   /** Icono propio: ruta dentro de assets/ (`iconos/volar.png`). Sin él se usa uno provisional de su color. */
   icon?: string;
+}
+
+/** ¿Lleva el tipo este elemento? El título va aparte: está salvo que se quite (`noTitle`). */
+export const hasElement = (t: Pick<TypeAnswer, 'elements' | 'noTitle'>, e: ElementKey) => (e === 'title' ? !t.noTitle : t.elements.includes(e));
+
+/** Pone o quita un elemento de un tipo. */
+export function setElement(t: TypeAnswer, e: ElementKey, on: boolean) {
+  if (e === 'title') {
+    if (on) delete t.noTitle;
+    else t.noTitle = true;
+  } else if (on && !t.elements.includes(e)) t.elements = [...t.elements, e];
+  else if (!on) t.elements = t.elements.filter((x) => x !== e);
 }
 
 export const isAbility = (at: Pick<AttrAnswer, 'kind'> | undefined) => at?.kind === 'icon';
@@ -316,8 +334,9 @@ export function resolvedType(
   const chosen = new Set(cur.attributes.map(normalizeKey));
   const picked = answers.attributes.filter((at) => attrKey(at) && chosen.has(attrKey(at)));
   const attributes = picked.map(attrKey);
-  const declared = new Set(cur.elements);
-  const elements = new Set(cur.elements);
+  const declared = new Set<ElementKey>(cur.elements.filter((e) => e !== 'title'));
+  if (!cur.noTitle) declared.add('title');
+  const elements = new Set(declared);
   if (!attributes.length) elements.delete('stats');
   const stats = picked.filter((at) => !isAbility(at)).map(attrKey);
   const abilities = picked.filter(isAbility).map(attrKey);

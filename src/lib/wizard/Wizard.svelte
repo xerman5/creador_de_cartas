@@ -18,11 +18,13 @@
     FONT_PAIRS,
     fontStack,
     fullName,
+    hasElement,
     isAbility,
     typeLabel,
     PALETTES,
     relang,
     resolvedType,
+    setElement,
     textKey,
     typeKey,
     type DesignId,
@@ -277,7 +279,7 @@
     if (!name) return;
     if (clases.some((c) => normalizeKey(c) === normalizeKey(name))) return alert(`Ya hay una clase «${name}».`);
     for (const t of answers.types.filter((x) => x.clase?.trim() === from))
-      answers.types.push({ clase: name, label: t.label, count: t.count, elements: [...t.elements], attributes: [...t.attributes] });
+      answers.types.push({ clase: name, label: t.label, count: t.count, elements: [...t.elements], attributes: [...t.attributes], ...(t.noTitle ? { noTitle: true } : {}) });
   }
 
   function removeType(i: number) {
@@ -288,11 +290,9 @@
   }
 
   function toggleElement(t: TypeAnswer, e: ElementKey) {
-    if (t.elements.includes(e)) t.elements = t.elements.filter((x) => x !== e);
-    else {
-      t.elements = [...t.elements, e];
-      if (e === 'stats' && !t.attributes.length) t.attributes = answers.attributes.map(attrKey).filter(Boolean);
-    }
+    const on = !hasElement(t, e);
+    setElement(t, e, on);
+    if (on && e === 'stats' && !t.attributes.length) t.attributes = answers.attributes.map(attrKey).filter(Boolean);
   }
 
   function toggleAttr(t: TypeAnswer, key: string) {
@@ -778,8 +778,9 @@
     const model = named.find((t) => normalizeKey(t.label) === normalizeKey(label)) ?? named[0];
     const elements = [...new Set<ElementKey>(['art', ...(model?.elements ?? ['rules', 'number'])])];
     const attributes = model?.attributes ? [...model.attributes] : [];
-    if (answers.types.length === 1 && !answers.types[0].label.trim()) Object.assign(answers.types[0], { label, clase, count, elements, attributes });
-    else answers.types.push({ label, clase, count, elements, attributes });
+    const noTitle = model?.noTitle ? { noTitle: true } : {};
+    if (answers.types.length === 1 && !answers.types[0].label.trim()) Object.assign(answers.types[0], { label, clase, count, elements, attributes, ...noTitle });
+    else answers.types.push({ label, clase, count, elements, attributes, ...noTitle });
   }
 
   /** Imágenes con un nombre mal escrito («lugres003.png»): se renombran al del tipo bueno («lugar-003.png»). */
@@ -1475,7 +1476,7 @@
       {@render namingPanel()}
     {:else if STEPS[step].id === 'contenido'}
       <h2>Qué lleva cada carta</h2>
-      <p class="lead">Marca lo que tiene cada tipo. El título está siempre. La carta de la derecha cambia con cada respuesta.</p>
+      <p class="lead">Marca lo que tiene cada tipo. La carta de la derecha cambia con cada respuesta.</p>
       {@render typeTabs()}
       {#if currentType}
         {@const others = answers.types.filter((o) => o !== currentType && !o.sameAs)}
@@ -1496,8 +1497,8 @@
         {:else}
           <div class="elements">
             {#each ELEMENTS as el}
-              <button class="element" class:active={currentType.elements.includes(el.key)} onclick={() => toggleElement(currentType, el.key)}>
-                <span class="tick">{currentType.elements.includes(el.key) ? '✓' : ''}</span>
+              <button class="element" class:active={hasElement(currentType, el.key)} onclick={() => toggleElement(currentType, el.key)}>
+                <span class="tick">{hasElement(currentType, el.key) ? '✓' : ''}</span>
                 <span><b>{el.label}</b><small>{el.hint}</small></span>
               </button>
             {/each}
