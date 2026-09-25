@@ -3,19 +3,21 @@
   import type { Zone } from '../../core/types';
   import {
     attrKey,
+    ELEMENTS as CONTENT,
+    FONT_PAIRS,
     isAbility,
     mergeFine,
-    resolvedType,
     type FineTune,
     type IconStyle,
     type PieceColor,
     type PieceStyle,
+    type ElementKey,
     type TextStyle,
     type WizardAnswers,
   } from '../../core/wizard/answers';
   import ResourceShelf from '../ResourceShelf.svelte';
   import ResourceSlot from '../ResourceSlot.svelte';
-  import { clearOwn, fineFor, hasOwn, type Library, type Scope, type TourElement } from './tour';
+  import { clearOwn, contentType, ELEMENT_OF, fineFor, hasOwn, type Library, type Scope, type TourElement } from './tour';
 
   let {
     answers = $bindable(),
@@ -67,23 +69,31 @@
   ];
 
   // ---------------------------------------------------------- escribir en el ajuste que toca
+  // Ojo: en un estado de Svelte, `a.b ??= {}` devuelve el objeto sin envolver; hay que volver a leerlo.
 
   const target = (): Partial<FineTune> => fineFor(answers, t, where);
   function piece(id: string): PieceStyle {
     const f = target();
-    return ((f.pieces ??= {})[id] ??= {});
+    f.pieces ??= {};
+    f.pieces[id] ??= {};
+    return f.pieces[id];
   }
   function text(id: string): TextStyle {
     const f = target();
-    return ((f.texts ??= {})[id] ??= {});
+    f.texts ??= {};
+    f.texts[id] ??= {};
+    return f.texts[id];
   }
   function icon(id: string): IconStyle {
     const f = target();
-    return ((f.icons ??= {})[id] ??= {});
+    f.icons ??= {};
+    f.icons[id] ??= {};
+    return f.icons[id];
   }
   function setImage(which: 'background' | 'frame', path: string | undefined) {
     const f = target();
-    const images = (f.images ??= {});
+    f.images ??= {};
+    const images = f.images;
     // En un tipo, «sin imagen» se guarda vacío para tapar la de todos.
     if (path) images[which] = path;
     else if (where === 'type') images[which] = '';
@@ -92,7 +102,11 @@
   }
   function setLayout<K extends 'art' | 'attrSide' | 'costCorner'>(key: K, v: WizardAnswers['adjust'][K]) {
     if (where === 'all') answers.adjust[key] = v;
-    else ((t.fine ??= {}).layout ??= {})[key] = v;
+    else {
+      t.fine ??= {};
+      t.fine.layout ??= {};
+      t.fine.layout[key] = v;
+    }
   }
 
   /** Vuelve a lo del diseño (o, en un tipo, a lo de todos) en este elemento. */
@@ -109,15 +123,38 @@
   // ---------------------------------------------------------- recursos
 
   let picking = $state<'background' | 'frame' | number | 'coste' | null>(null);
-  const r = $derived(t ? resolvedType(answers, t) : null);
-  const statAttrs = $derived(answers.attributes.map((at, i) => ({ at, i })).filter(({ at }) => r?.stats.includes(attrKey(at))));
-  const abilityAttrs = $derived(answers.attributes.map((at, i) => ({ at, i })).filter(({ at }) => r?.abilities.includes(attrKey(at))));
 
   function pickIcon(target: number | 'coste') {
     picking = picking === target ? null : target;
   }
 
   const px = $derived(cardPixels({ width: answers.size.width, height: answers.size.height }, 300));
+  const fonts = $derived(FONT_PAIRS[answers.adjust.fonts] ?? FONT_PAIRS.clasica);
+
+  // ---------------------------------------------------------- contenido del tipo
+
+  /** Tipo que decide el contenido (si este es «igual que» otro, el otro). */
+  const src = $derived(contentType(answers, t));
+  const missing = $derived(CONTENT.filter((e) => !src.elements.includes(e.key)));
+
+  function addElement(key: ElementKey) {
+    src.elements = [...src.elements, key];
+    if (key === 'stats' && !src.attributes.length) src.attributes = answers.attributes.map(attrKey).filter(Boolean);
+  }
+  function removeElement(key: ElementKey) {
+    src.elements = src.elements.filter((e) => e !== key);
+  }
+  function toggleAttr(key: string, on: boolean) {
+    src.attributes = on ? [...src.attributes.filter((k) => k !== key), key] : src.attributes.filter((k) => k !== key);
+  }
+  function newAttr(kind: 'number' | 'icon') {
+    const label = prompt(kind === 'icon' ? 'Nombre de la habilidad (p. ej. Volar):' : 'Nombre del atributo (p. ej. Defensa):')?.trim();
+    if (!label) return;
+    if (answers.attributes.some((at) => attrKey(at) === attrKey({ label })) || attrKey({ label }) === 'coste') return alert(`Ya existe «${label}».`);
+    const colors = ['#d9534f', '#4caf50', '#3d8fe0', '#f0b429', '#a45bd6', '#26a69a', '#ef7d3c', '#8d6e63'];
+    answers.attributes.push({ label, color: colors[answers.attributes.length % colors.length], kind });
+    toggleAttr(attrKey({ label }), true);
+  }
 </script>
 
 {#snippet swatches(value: string | undefined, label: string, onpick: (c: PieceColor) => void, none = true)}
@@ -161,6 +198,7 @@
   {@const z = zone(id)}
   {#if z && z.type === 'text'}
     {@const cur = eff.texts[id] ?? {}}
+    {@const family = cur.font ?? (z.font.family === fonts.title && fonts.title !== fonts.body ? 'title' : 'body')}
     <div class="ctl">
       <span class="lbl">Color</span>
       {@render swatches(cur.color, `${label}, color`, (c) => (text(id).color = c as never), false)}
@@ -183,8 +221,8 @@
     <div class="ctl">
       <span class="lbl">Letra</span>
       <div class="seg" role="group" aria-label="Letra de {label}">
-        <button class:active={cur.font === 'title'} onclick={() => (text(id).font = 'title')}>La de títulos</button>
-        <button class:active={cur.font === 'body'} onclick={() => (text(id).font = 'body')}>La de textos</button>
+        <button class:active={family === 'title'} onclick={() => (text(id).font = 'title')} style:font-family={fonts.title}>La de títulos</button>
+        <button class:active={family === 'body'} onclick={() => (text(id).font = 'body')} style:font-family={fonts.body}>La de textos</button>
       </div>
       <label class="inline"><input type="checkbox" checked={cur.bold ?? z.font.weight === 'bold'} onchange={(e) => (text(id).bold = e.currentTarget.checked)} /> Negrita</label>
       <label class="inline"><input type="checkbox" checked={cur.italic ?? z.font.style === 'italic'} onchange={(e) => (text(id).italic = e.currentTarget.checked)} /> Cursiva</label>
@@ -214,24 +252,38 @@
   </p>
 {/snippet}
 
-{#snippet attrSlots(list: { at: WizardAnswers['attributes'][number]; i: number }[])}
-  <div class="slots">
-    {#each list as { at, i }}
-      <div class="slotitem">
-        <ResourceSlot
-          url={iconUrl(at)}
-          label={at.label}
-          custom={!!at.icon}
-          active={picking === i}
-          onclick={() => pickIcon(i)}
-          onfile={(f) => setIcon(i, lib.add([f], 'iconos')[0])}
-          onpath={(p) => setIcon(i, p)}
-          size={40}
-        />
-        <small>{at.label}</small>
-      </div>
+{#snippet attrEditor(kind: 'number' | 'icon')}
+  <div class="attrs">
+    {#each answers.attributes as at, i}
+      {@const key = attrKey(at)}
+      {#if key && (kind === 'icon') === isAbility(at)}
+        <div class="attr">
+          <label class="inline" title="¿Lo lleva «{t.label}»?">
+            <input type="checkbox" checked={src.attributes.includes(key)} onchange={(e) => toggleAttr(key, e.currentTarget.checked)} aria-label="«{t.label}» lleva {at.label}" />
+          </label>
+          <ResourceSlot
+            url={iconUrl(at)}
+            label={at.label}
+            custom={!!at.icon}
+            active={picking === i}
+            onclick={() => pickIcon(i)}
+            onfile={(f) => setIcon(i, lib.add([f], 'iconos')[0])}
+            onpath={(p) => setIcon(i, p)}
+          />
+          <span class="name" class:off={!src.attributes.includes(key)}>{at.label}</span>
+          <div class="seg" role="group" aria-label="Clase de {at.label}">
+            <button class:active={!isAbility(at)} onclick={() => (at.kind = 'number')} title="Un número que cambia en cada carta">Con número</button>
+            <button class:active={isAbility(at)} onclick={() => (at.kind = 'icon')} title="La carta la tiene o no">Solo icono</button>
+          </div>
+        </div>
+      {/if}
     {/each}
+    <button class="small" onclick={() => newAttr(kind)}>＋ {kind === 'icon' ? 'Habilidad' : 'Atributo'}</button>
   </div>
+  <p class="hint">
+    Marca los que lleva «{t.label}». Cambiar la clase mueve el atributo entre «Atributos» (con número) y «Habilidades» (solo icono), en
+    todos los tipos.{#if src !== t} «{t.label}» es igual que «{src.label}»: los cambios valen para los dos.{/if}
+  </p>
 {/snippet}
 
 {#if t && E}
@@ -261,6 +313,23 @@
           </button>
         </li>
       {/each}
+      {#if missing.length}
+        <li>
+          <select
+            class="add"
+            aria-label="Añadir un elemento a {t.label}"
+            value=""
+            onchange={(e) => {
+              const v = e.currentTarget.value as ElementKey;
+              e.currentTarget.value = '';
+              if (v) addElement(v);
+            }}
+          >
+            <option value="">＋ Añadir…</option>
+            {#each missing as m}<option value={m.key}>{m.label}</option>{/each}
+          </select>
+        </li>
+      {/if}
     </ol>
 
     <section class="panel">
@@ -387,8 +456,8 @@
           </label>
         </div>
         {@render pieceRow('fondo atributos', 'Fondo de los atributos')}
-        <span class="lbl">Iconos</span>
-        {@render attrSlots(statAttrs)}
+        <span class="lbl">Qué atributos lleva</span>
+        {@render attrEditor('number')}
         {@render iconShelf()}
       {:else if E.id === 'habilidades'}
         {@const ic = eff.icons?.habilidades ?? {}}
@@ -415,8 +484,8 @@
             {Math.round((ic.scale ?? 1) * 100)} %
           </label>
         </div>
-        <span class="lbl">Iconos</span>
-        {@render attrSlots(abilityAttrs)}
+        <span class="lbl">Qué habilidades puede tener</span>
+        {@render attrEditor('icon')}
         {@render iconShelf()}
         <p class="hint">Qué cartas tienen cada habilidad se marca en la tabla de cartas.</p>
       {:else if E.id === 'coste'}
@@ -470,6 +539,12 @@
       {/if}
 
       <div class="foot">
+        {#if ELEMENT_OF[E.id]}
+          <button class="ghost small" onclick={() => removeElement(ELEMENT_OF[E.id]!)} title={src !== t ? `También en «${src.label}»` : undefined}>
+            Quitar {E.id === 'atributos' || E.id === 'habilidades' ? 'atributos y habilidades' : `«${E.label}»`} de «{t.label}»
+          </button>
+          <span class="grow"></span>
+        {/if}
         <button class="ghost small" onclick={reset}>
           {where === 'type' ? `Quitar los ajustes propios de «${t.label}» aquí` : 'Restablecer este elemento'}
         </button>
@@ -629,5 +704,32 @@
   .foot {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
+  }
+  .grow {
+    flex: 1;
+  }
+  .attrs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .attr {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  .attr .name {
+    min-width: 110px;
+  }
+  .attr .name.off {
+    color: var(--muted);
+    text-decoration: line-through;
+  }
+  select.add {
+    padding: 2px 8px;
+    font-size: 12px;
+    border-radius: 999px;
   }
 </style>

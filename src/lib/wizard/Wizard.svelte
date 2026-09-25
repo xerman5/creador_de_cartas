@@ -28,6 +28,7 @@
   import ResourceSlot from '../ResourceSlot.svelte';
   import { tourElements, type Library } from './tour';
   import TypeTour from './TypeTour.svelte';
+  import { acceptsDrop, droppedEntries } from '../drop';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
@@ -514,6 +515,23 @@
       const path = (file.webkitRelativePath || file.name).split('/').slice(1).join('/') || file.name;
       if (IMAGE_FILE.test(path)) map.set(path, file);
     }
+    imageMap = map;
+    runMatch();
+  }
+
+  let dropOver = $state(false);
+
+  /** Imágenes o una carpeta soltadas: se suman a las que ya hay y se vuelve a emparejar. */
+  async function dropImages(e: DragEvent) {
+    dropOver = false;
+    e.preventDefault();
+    const list = await droppedEntries(e);
+    if (!list.length) return;
+    // Si se suelta una sola carpeta, las rutas son relativas a ella, como al elegirla.
+    const tops = new Set(list.map((d) => (d.path.includes('/') ? d.path.split('/')[0] : '')));
+    const strip = tops.size === 1 && !tops.has('');
+    const map = new Map(imageMap);
+    for (const d of list) map.set(strip ? d.path.split('/').slice(1).join('/') : d.path, d.file);
     imageMap = map;
     runMatch();
   }
@@ -1105,8 +1123,22 @@
             </label>
           </li>
         </ol>
-        <div class="row">
+        <div
+          class="row dropzone"
+          class:over={dropOver}
+          role="region"
+          aria-label="Soltar imágenes"
+          ondragover={(e) => {
+            if (acceptsDrop(e)) {
+              e.preventDefault();
+              dropOver = true;
+            }
+          }}
+          ondragleave={() => (dropOver = false)}
+          ondrop={dropImages}
+        >
           <button class="primary" onclick={() => folderInput.click()}>Elegir carpeta de imágenes…</button>
+          <span class="hint">o suéltala aquí (también imágenes sueltas)</span>
           {#if imageMap.size}<button class="small" onclick={runMatch}>Volver a emparejar</button>{/if}
         </div>
         <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
@@ -1507,6 +1539,15 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .dropzone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .dropzone.over {
+    border-color: var(--accent);
+    background: rgba(76, 125, 255, 0.08);
   }
   .seg {
     display: flex;

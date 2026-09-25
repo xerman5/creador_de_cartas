@@ -1,5 +1,6 @@
 import type { Zone } from '../../core/types';
-import type { FineTune, TypeAnswer, WizardAnswers } from '../../core/wizard/answers';
+import { normalizeKey } from '../../core/text';
+import type { ElementKey, FineTune, TypeAnswer, WizardAnswers } from '../../core/wizard/answers';
 import type { ShelfId } from '../../core/wizard/resources';
 
 /** Biblioteca del asistente (iconos y fondos subidos). */
@@ -46,7 +47,35 @@ export type Scope = 'all' | 'type';
 /** Dónde se escribe un ajuste: en el de todos los tipos o en el de este tipo. */
 export function fineFor(answers: WizardAnswers, t: TypeAnswer | undefined, scope: Scope): Partial<FineTune> {
   if (scope === 'all' || !t) return answers.fine;
-  return (t.fine ??= {});
+  // En un estado de Svelte, `??=` devuelve el objeto sin envolver: se vuelve a leer.
+  t.fine ??= {};
+  return t.fine;
+}
+
+/** Qué elemento del asistente («Qué lleva cada carta») es cada paso del recorrido. */
+export const ELEMENT_OF: Record<string, ElementKey | undefined> = {
+  ilustracion: 'art',
+  linea: 'subtitle',
+  reglas: 'rules',
+  ambientacion: 'flavor',
+  atributos: 'stats',
+  habilidades: 'stats',
+  coste: 'cost',
+  rareza: 'variant',
+  numero: 'number',
+};
+
+/** El tipo que decide el contenido: el mismo o, si es «igual que» otro, ese otro. */
+export function contentType(answers: WizardAnswers, t: TypeAnswer): TypeAnswer {
+  let cur = t;
+  const seen = new Set<TypeAnswer>();
+  while (cur.sameAs && !seen.has(cur)) {
+    seen.add(cur);
+    const next = answers.types.find((o) => normalizeKey(o.label) === normalizeKey(cur.sameAs!));
+    if (!next) break;
+    cur = next;
+  }
+  return cur;
 }
 
 const LAYOUT_KEYS: Record<string, string[]> = { ilustracion: ['art'], reglas: ['art'], atributos: ['attrSide'], coste: ['costCorner'] };
