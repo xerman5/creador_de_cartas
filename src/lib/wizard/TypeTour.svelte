@@ -227,8 +227,8 @@
     <button class="small" onclick={() => newAttr(kind)}>＋ {kind === 'icon' ? 'Habilidad' : 'Atributo'}</button>
   </div>
   <p class="hint">
-    Marca los que lleva «{typeLabel(t)}». Con número van en «Atributos»; solo icono, en «Habilidades» (una fila sobre la ilustración, y
-    cada carta lleva las que marques en la tabla). La clase vale para todos los tipos.{#if src !== t} «{typeLabel(t)}» es igual que «{typeLabel(src)}»: los cambios valen para los dos.{/if}
+    Marca los que lleva «{typeLabel(t)}». Con número van en «Atributos»; solo icono, en «Habilidades» (en el mismo lado, y cada carta
+    lleva las que marques en la tabla). La clase vale para todos los tipos.{#if src !== t} «{typeLabel(t)}» es igual que «{typeLabel(src)}»: los cambios valen para los dos.{/if}
   </p>
 {/snippet}
 
@@ -415,14 +415,29 @@
           <span class="lbl">Fondo del icono</span>
           {@render swatches(ic.backdrop ?? 'papel', 'Fondo de las habilidades', (c) => (icon('habilidades').backdrop = c))}
         </div>
+        {@const abZone = zone('habilidades') as { align?: string; direction?: string } | undefined}
         <div class="ctl">
-          <span class="lbl">Alineación</span>
-          <div class="seg" role="group" aria-label="Alineación de las habilidades">
-            {#each [['start', 'Izquierda'], ['center', 'Centro'], ['end', 'Derecha']] as [v, name]}
-              <button class:active={(ic.align ?? (zone('habilidades') as { align?: string } | undefined)?.align) === v} onclick={() => (icon('habilidades').align = v as never)}>{name}</button>
+          <span class="lbl">Lado</span>
+          <div class="seg" role="group" aria-label="Lado de las habilidades">
+            {#each [['left', 'Izquierda'], ['right', 'Derecha'], ['bottom', 'Abajo']] as [v, name]}
+              <button class:active={layout.attrSide === v} onclick={() => setLayout('attrSide', v as never)}>{name}</button>
             {/each}
           </div>
         </div>
+        {#if abZone?.direction !== 'column'}
+          <div class="ctl">
+            <span class="lbl">Alineación</span>
+            <div class="seg" role="group" aria-label="Alineación de las habilidades">
+              {#each [['start', 'Izquierda'], ['center', 'Centro'], ['end', 'Derecha']] as [v, name]}
+                <button class:active={(ic.align ?? abZone?.align) === v} onclick={() => (icon('habilidades').align = v as never)}>{name}</button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+        <p class="hint">
+          El mismo lado que los atributos. Sin atributos con número, las habilidades ocupan su franja; si no, van en fila sobre la ilustración,
+          hacia ese lado.
+        </p>
         <div class="ctl">
           <span class="lbl">Tamaño</span>
           <label class="inline">
