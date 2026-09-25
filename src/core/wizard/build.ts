@@ -158,7 +158,14 @@ export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number, 
       }
       if (ic.value) out.valuePosition = ic.value;
       if (ic.labels !== undefined) out.labels = ic.labels;
-      if (ic.backdrop) out.backdrop = ic.backdrop === 'none' ? undefined : ic.backdrop;
+      if (ic.backdrop) {
+        out.backdrop = ic.backdrop === 'none' ? undefined : ic.backdrop;
+        // El texto junto al icono tiene que leerse sobre su fondo; sin fondo, blanco con contorno.
+        const ink = { tinta: 'papel', principal: 'papel', papel: 'tinta', acento: 'tinta' }[ic.backdrop as string];
+        out.font = ink
+          ? { ...out.font, color: ink, strokeColor: undefined, strokeWidth: undefined }
+          : { ...out.font, color: '#ffffff', strokeColor: '#000000', strokeWidth: r2(0.35 * f) };
+      }
       if (ic.align) out.align = ic.align;
       return out;
     }

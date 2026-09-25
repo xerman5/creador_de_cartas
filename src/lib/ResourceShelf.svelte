@@ -61,7 +61,7 @@
           e.dataTransfer?.setData('text/plain', it.path);
         }}
         onclick={() => onpick?.(it.path)}
-        disabled={!onpick}
+        class:pickable={!!onpick}
       >
         <img src={it.url} alt="" loading="lazy" />
       </button>
@@ -127,9 +127,8 @@
     place-items: center;
     cursor: grab;
   }
-  .thumb:disabled {
-    cursor: grab;
-    opacity: 1;
+  .thumb.pickable {
+    cursor: pointer;
   }
   .item.selected .thumb {
     outline: 2px solid var(--accent);

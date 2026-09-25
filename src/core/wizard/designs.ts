@@ -245,7 +245,8 @@ class Layout {
       gap,
       iconSize: icon,
       valuePosition: 'after',
-      font: this.valueFont(icon * 0.8),
+      // Sobre el fondo claro de cada icono, el texto (nombre o valor) va en tinta.
+      font: { family: this.titleFont, size: r2(Math.max(5, icon * 1.1)), weight: 'bold', color: 'tinta' },
       backdrop: 'papel',
       backdropOpacity: 0.85,
       rect: r,

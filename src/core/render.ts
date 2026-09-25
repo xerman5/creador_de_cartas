@@ -431,12 +431,16 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
 
   // Lo que se escribe junto a cada icono: su valor o, si se pide, su nombre.
   const texts = items.map((it) => it.value || (zone.labels ? (rc.lp.project.attributes[it.key]?.label ?? it.key) : ''));
+  const backdrop = zone.backdrop ? colorFor(rc, undefined, zone.backdrop, zone.id) : '';
+  // Con fondo, cada celda lleva un margen alrededor (y uno más tras el texto): cuenta al alinear.
+  const pad = backdrop ? icon * 0.1 : 0;
   ctx.font = fontString(font, sizePx);
   const cells = texts.map((text) => {
     const tw = text ? ctx.measureText(text).width : 0;
-    if (pos === 'after') return { w: icon + (text ? gap * 0.5 + tw : 0), h: icon };
-    if (pos === 'below') return { w: Math.max(icon, tw), h: icon + (text ? sizePx * 1.1 : 0) };
-    return { w: icon, h: icon };
+    const extra = 2 * pad + (text ? pad : 0);
+    if (pos === 'after') return { w: icon + (text ? gap * 0.5 + tw : 0) + extra, h: icon };
+    if (pos === 'below') return { w: Math.max(icon, tw) + extra, h: icon + (text ? sizePx * 1.1 : 0) };
+    return { w: icon + 2 * pad, h: icon };
   });
 
   const total = cells.reduce((s, c) => s + (column ? c.h : c.w), 0) + gap * (cells.length - 1);
@@ -444,24 +448,21 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
   let cursor = zone.align === 'center' ? (avail - total) / 2 : zone.align === 'end' ? avail - total : 0;
   const widest = Math.max(...cells.map((c) => c.w));
 
-  const backdrop = zone.backdrop ? colorFor(rc, undefined, zone.backdrop, zone.id) : '';
-
   ctx.textBaseline = 'middle';
   items.forEach((it, i) => {
     const cell = cells[i];
     const cx = column ? r.x + (r.w - (pos === 'after' ? widest : cell.w)) / 2 : r.x + cursor;
     const cy = column ? r.y + cursor : r.y + (r.h - cell.h) / 2;
-    const ix = pos === 'below' ? cx + (cell.w - icon) / 2 : cx;
+    const ix = pos === 'below' ? cx + (cell.w - icon) / 2 : cx + pad;
     const iy = cy;
 
     if (backdrop) {
-      // Una píldora que abarca icono y texto, un poco más grande que ellos.
-      const pad = icon * 0.1;
+      // Una píldora que abarca icono y texto; por arriba y por abajo sobresale el margen.
       ctx.save();
       ctx.globalAlpha = Math.min(1, Math.max(0, zone.backdropOpacity ?? 1));
       ctx.fillStyle = backdrop;
       ctx.beginPath();
-      ctx.roundRect(cx - pad, cy - pad, cell.w + 2 * pad + (texts[i] ? pad : 0), cell.h + 2 * pad, (Math.min(cell.w, cell.h) + 2 * pad) / 2);
+      ctx.roundRect(cx, cy - pad, cell.w, cell.h + 2 * pad, (Math.min(cell.w, cell.h) + 2 * pad) / 2);
       ctx.fill();
       ctx.restore();
     }
