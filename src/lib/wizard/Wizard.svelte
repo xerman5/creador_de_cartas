@@ -10,7 +10,9 @@
     fileKey,
     DESIGNS,
     ELEMENTS,
+    flagOn,
     FONT_PAIRS,
+    isAbility,
     PALETTES,
     resolvedType,
     textKey,
@@ -21,7 +23,10 @@
     type TypeAnswer,
     type WizardAnswers,
   } from '../../core/wizard/answers';
-  import { buildProject, cardIds, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles } from '../../core/wizard/build';
+  import { buildProject, cardIds, costSvg, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles, provisionalIcon } from '../../core/wizard/build';
+  import { matchByName, resourceFiles, resourcePath, shelfOf, type Resources, type ShelfId } from '../../core/wizard/resources';
+  import ResourceShelf from '../ResourceShelf.svelte';
+  import ResourceSlot from '../ResourceSlot.svelte';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
@@ -31,12 +36,14 @@
     clearDraft,
     imageFiles,
     loadDraft,
+    loadDraftResources,
     parseProgress,
     previewLabel,
     previewProject,
     progressJson,
     rowOfType,
     saveDraft,
+    saveDraftResources,
   } from './preview';
 
   let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
@@ -101,12 +108,13 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const f = focus;
     const images = imageMap;
+    const res = resources;
     const sid = stepId;
     let cancelled = false;
     const t = setTimeout(async () => {
       saveDraft(snap, sid);
       try {
-        const lp = await previewProject(snap, { focus: f, images });
+        const lp = await previewProject(snap, { focus: f, images, resources: res });
         if (cancelled) return lp.assets.dispose();
         swap(preview);
         preview = lp;
@@ -127,7 +135,7 @@
     let cancelled = false;
     (async () => {
       const next: Partial<Record<DesignId, LoadedProject>> = {};
-      for (const d of DESIGNS) next[d.id] = await previewProject(snap, { design: d.id });
+      for (const d of DESIGNS) next[d.id] = await previewProject(snap, { design: d.id, resources });
       if (cancelled) return Object.values(next).forEach((lp) => lp?.assets.dispose());
       Object.values(designPreviews).forEach((lp) => swap(lp ?? null));
       designPreviews = next;
@@ -239,6 +247,7 @@
     row = 0;
     imageMap = new Map();
     match = null;
+    setResources(new Map());
   }
 
   // ------------------------------------------------------------ progreso
@@ -246,16 +255,17 @@
   let notice = $state('');
   let progressInput: HTMLInputElement;
 
-  function saveProgress() {
-    const json = progressJson($state.snapshot(answers) as WizardAnswers, stepId);
+  async function saveProgress() {
+    const json = await progressJson($state.snapshot(answers) as WizardAnswers, stepId, resources);
     downloadBlob(new Blob([json], { type: 'application/json' }), `${slug(answers.name)}.asistente.json`);
-    notice = 'Progreso guardado. Para seguir otro día, abre el asistente y pulsa «Cargar progreso…».';
+    notice = 'Progreso guardado (con tus iconos y fondos). Para seguir otro día, abre el asistente y pulsa «Cargar progreso…».';
   }
 
   async function loadProgress(file: File) {
     try {
       const p = parseProgress(await file.text());
       answers = p.answers;
+      setResources(p.resources ?? new Map());
       step = stepIndex(p.step);
       reached = Math.max(step, STEPS.length - 1);
       current = 0;
@@ -265,6 +275,87 @@
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
+  }
+
+  // ------------------------------------------------------------ recursos (iconos y fondos)
+
+  /** Iconos y fondos subidos: van al proyecto y al archivo de progreso. */
+  let resources = $state.raw<Resources>(new Map());
+  let resourceUrls = $state.raw<Map<string, string>>(new Map());
+  // Al abrir, los del borrador de este navegador (si no se ha cargado ya otra cosa).
+  loadDraftResources().then((r) => {
+    if (!resources.size && r.size) resources = r;
+  });
+
+  $effect(() => {
+    const m = new Map([...resources].map(([p, b]) => [p, URL.createObjectURL(b)]));
+    resourceUrls = m;
+    return () => setTimeout(() => m.forEach((u) => URL.revokeObjectURL(u)), 4000);
+  });
+
+  function setResources(next: Resources) {
+    resources = next;
+    saveDraftResources(next);
+  }
+
+  /** Copia archivos a un estante y devuelve sus rutas (en el mismo orden). */
+  function addResources(files: File[], shelf: ShelfId): string[] {
+    const next = new Map(resources);
+    const paths = files.map((f) => {
+      const path = resourcePath(shelf, f.name, (p) => next.has(p));
+      next.set(path, f);
+      return path;
+    });
+    setResources(next);
+    return paths;
+  }
+
+  function removeResource(path: string) {
+    const next = new Map(resources);
+    next.delete(path);
+    setResources(next);
+    for (const at of answers.attributes) if (at.icon === path) at.icon = undefined;
+    if (answers.costIcon === path) answers.costIcon = undefined;
+  }
+
+  const shelfItems = (shelf: ShelfId) => [...resourceUrls].filter(([p]) => shelfOf(p) === shelf).map(([path, url]) => ({ path, url }));
+
+  const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
+  /** Lo que se ve en el hueco del icono: el propio o el provisional. */
+  function iconUrl(at: { label: string; color: string; icon?: string }): string | undefined {
+    if (at.icon) return resourceUrls.get(at.icon);
+    return svgUrl(provisionalIcon(attrKey(at), at.color, answers.adjust.palette.tinta));
+  }
+  const costUrl = $derived(answers.costIcon ? resourceUrls.get(answers.costIcon) : svgUrl(costSvg(answers.adjust.palette)));
+
+  /** Atributo (índice) o «coste» cuyo icono se está eligiendo en la biblioteca. */
+  let picking = $state<number | 'coste' | null>(null);
+  let iconReport = $state('');
+
+  function setIcon(target: number | 'coste', path: string | undefined) {
+    if (target === 'coste') answers.costIcon = path;
+    else if (answers.attributes[target]) answers.attributes[target].icon = path;
+    picking = null;
+  }
+
+  /** Iconos nuevos: los que se llaman como un atributo sin icono propio se le asignan solos. */
+  function addIcons(files: File[]) {
+    const paths = addResources(files, 'iconos');
+    const byFile = new Map(files.map((f, i) => [f, paths[i]]));
+    const names = answers.attributes.filter((at) => !at.icon && attrKey(at)).map((at) => at.label);
+    if (uses('cost') && !answers.costIcon) names.push('Coste');
+    const matched = matchByName(files, names);
+    for (const [name, file] of matched) {
+      if (name === 'Coste' && !answers.attributes.some((at) => at.label === 'Coste')) answers.costIcon = byFile.get(file);
+      else {
+        const at = answers.attributes.find((x) => x.label === name);
+        if (at) at.icon = byFile.get(file);
+      }
+    }
+    iconReport =
+      `${files.length} ${files.length === 1 ? 'icono añadido' : 'iconos añadidos'}` +
+      (matched.size ? `; puestos por su nombre: ${[...matched.keys()].join(', ')}.` : '. Arrástralos a cada atributo o haz clic en su icono.');
   }
 
   // ------------------------------------------------------------ ajuste fino
@@ -451,7 +542,7 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
     const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
-    return { ...projectFiles(buildProject(snap)), ...imageFiles(images) };
+    return { ...projectFiles(buildProject(snap)), ...resourceFiles(resources), ...imageFiles(images) };
   }
 
   async function run(label: string, fn: () => Promise<void>) {
@@ -634,10 +725,11 @@
       {/if}
       {#if uses('stats')}
         <div class="field">
-          <span>¿Qué atributos existen en tu juego?</span>
+          <span>¿Qué atributos y habilidades existen en tu juego?</span>
           <p class="hint">
-            Un atributo es un <b>número con icono</b> que cambia en cada carta: Ataque 3, Vida 5, Velocidad 2. Cada uno tendrá un icono
-            provisional de su color, y en los textos <code>{'{ataque}'}</code> dibuja su icono.
+            Hay dos clases: <b>con número</b>, que cambia en cada carta (Ataque 3, Vida 5), y <b>solo icono</b>, una habilidad que la
+            carta tiene o no (Volar, Veneno). Las habilidades van en su propia fila. En los textos, <code>{'{ataque}'}</code> dibuja su
+            icono.
           </p>
           <p class="hint">
             ¿Buscas una categoría como clan, facción o rareza? Eso no es un atributo: vuelve al paso anterior y marca «Rareza, clan o
@@ -645,8 +737,21 @@
           </p>
           {#each answers.attributes as at, i}
             <div class="row attr">
-              <input type="color" bind:value={at.color} />
+              <ResourceSlot
+                url={iconUrl(at)}
+                label={at.label || 'atributo'}
+                custom={!!at.icon}
+                active={picking === i}
+                onclick={() => (picking = picking === i ? null : i)}
+                onfile={(f) => setIcon(i, addResources([f], 'iconos')[0])}
+                onpath={(p) => setIcon(i, p)}
+              />
+              <input type="color" bind:value={at.color} title="Color del icono provisional" />
               <input type="text" value={at.label} oninput={(e) => renameAttr(i, e.currentTarget.value)} placeholder="Nombre" />
+              <div class="seg small-seg" role="group" aria-label="Clase de {at.label}">
+                <button class:active={!isAbility(at)} onclick={() => (at.kind = 'number')} title="Un número que cambia en cada carta">Con número</button>
+                <button class:active={isAbility(at)} onclick={() => (at.kind = 'icon')} title="La carta la tiene o no">Solo icono</button>
+              </div>
               <button class="ghost small" onclick={() => moveAttr(i, -1)} disabled={i === 0} title="Subir" aria-label="Subir {at.label}">↑</button>
               <button class="ghost small" onclick={() => moveAttr(i, 1)} disabled={i === answers.attributes.length - 1} title="Bajar" aria-label="Bajar {at.label}">↓</button>
               <button class="ghost small" onclick={() => removeAttr(i)} title="Quitar">✕</button>
@@ -655,22 +760,30 @@
           {#if answers.attributes.length > 1}
             <p class="hint">El orden de esta lista es el orden en que aparecen en la carta.</p>
           {/if}
-          <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length] })}>
-            ＋ Atributo
-          </button>
+          <div class="row">
+            <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length] })}>
+              ＋ Con número
+            </button>
+            <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length], kind: 'icon' })}>
+              ＋ Solo icono
+            </button>
+          </div>
         </div>
         {@const named = answers.attributes.filter((at) => attrKey(at))}
         {@const statTypes = answers.types.filter((t) => !t.sameAs && t.elements.includes('stats'))}
         <div class="field">
           <span>¿Qué atributos lleva cada tipo de carta?</span>
           {#if named.length}
-            <p class="hint">Marca las casillas: los atributos marcados aparecen, con su icono y su número, en todas las cartas de ese tipo.</p>
+            <p class="hint">
+              Marca las casillas: los atributos con número aparecen en todas las cartas de ese tipo; las habilidades, en las cartas que
+              las tengan (lo marcarás en la tabla de cartas).
+            </p>
             <div class="matrix-wrap">
               <table class="matrix">
                 <thead>
                   <tr>
                     <th></th>
-                    {#each named as at}<th><i style:background={at.color}></i>{at.label}</th>{/each}
+                    {#each named as at}<th><img src={iconUrl(at)} alt="" />{at.label}{#if isAbility(at)}<small>solo icono</small>{/if}</th>{/each}
                   </tr>
                 </thead>
                 <tbody>
@@ -701,7 +814,55 @@
         </div>
       {/if}
       {#if uses('cost')}
-        <p class="hint">El <b>coste</b> es un atributo aparte con icono de moneda; su valor va en la misma columna: <code>coste:3</code>.</p>
+        <div class="field">
+          <span>Coste</span>
+          <div class="row attr">
+            <ResourceSlot
+              url={costUrl}
+              label="Coste"
+              custom={!!answers.costIcon}
+              active={picking === 'coste'}
+              onclick={() => (picking = picking === 'coste' ? null : 'coste')}
+              onfile={(f) => setIcon('coste', addResources([f], 'iconos')[0])}
+              onpath={(p) => setIcon('coste', p)}
+            />
+            <p class="hint">El <b>coste</b> es un número con su propio icono, en una esquina. Su valor va en la misma columna que los atributos: <code>coste:3</code>.</p>
+          </div>
+        </div>
+      {/if}
+      {#if uses('stats') || uses('cost')}
+        <div class="field">
+          <span>Tus iconos</span>
+          {#if picking !== null}
+            {@const name = picking === 'coste' ? 'Coste' : answers.attributes[picking]?.label || 'este atributo'}
+            <p class="hint pick">
+              Elige el icono de <b>{name}</b>, o añade uno nuevo.
+              {#if picking === 'coste' ? answers.costIcon : answers.attributes[picking]?.icon}
+                <button class="ghost small" onclick={() => setIcon(picking!, undefined)}>Volver al provisional</button>
+              {/if}
+              <button class="ghost small" onclick={() => (picking = null)}>Cancelar</button>
+            </p>
+          {:else}
+            <p class="hint">
+              Suelta aquí tus iconos (PNG con transparencia o SVG), o una carpeta entera. Los que se llamen como un atributo se ponen
+              solos (<code>volar.png</code> → Volar); los demás, arrástralos a su atributo o haz clic en el icono del atributo para
+              elegirlo.
+            </p>
+          {/if}
+          <ResourceShelf
+            items={shelfItems('iconos')}
+            compact
+            selected={picking === null ? '' : ((picking === 'coste' ? answers.costIcon : answers.attributes[picking]?.icon) ?? '')}
+            onpick={picking === null ? undefined : (p) => setIcon(picking!, p)}
+            onadd={(files) => {
+              if (picking !== null) setIcon(picking, addResources(files, 'iconos')[0]);
+              else addIcons(files);
+            }}
+            onremove={removeResource}
+            empty="Sin iconos propios: se usan los provisionales, de colores."
+          />
+          {#if iconReport}<div class="report">{iconReport} <button class="ghost small" onclick={() => (iconReport = '')}>✕</button></div>{/if}
+        </div>
       {/if}
       {#if uses('variant')}
         <div class="field">
@@ -971,6 +1132,13 @@
                     <td class={c.kind}>
                       {#if c.kind === 'long'}
                         <textarea rows="2" value={cell(currentType, k, c.key)} placeholder={placeholder(c, k)} oninput={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}></textarea>
+                      {:else if c.kind === 'flag'}
+                        <input
+                          type="checkbox"
+                          checked={flagOn(cell(currentType, k, c.key))}
+                          onchange={(e) => setCell(currentType, k, c.key, e.currentTarget.checked ? 'x' : '')}
+                          aria-label="{c.label} en la carta {k + 1}"
+                        />
                       {:else if c.kind === 'variant'}
                         <select value={cell(currentType, k, c.key)} onchange={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}>
                           <option value="">(automática)</option>
@@ -996,7 +1164,7 @@
         <button class="small" onclick={addCard}>＋ Carta</button>
         <p class="hint">
           En las reglas: <code>**negrita**</code>, <code>*cursiva*</code> y <code>{'{atributo}'}</code> para poner su icono. Los números vacíos se
-          rellenan con valores de ejemplo. ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
+          rellenan con valores de ejemplo; las habilidades, solo si marcas la casilla (las cartas que aún no has tocado llevan algunas de ejemplo). ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
         </p>
       {/if}
     {:else if stepId === 'imagenes'}
@@ -1392,12 +1560,24 @@
     text-align: left;
     font-weight: 600;
   }
-  .matrix i {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    margin-right: 5px;
+  .matrix thead img {
+    display: block;
+    width: 22px;
+    height: 22px;
+    margin: 0 auto 3px;
+    object-fit: contain;
+  }
+  .matrix thead small {
+    display: block;
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  .small-seg button {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+  .pick {
+    color: var(--text);
   }
   .matrix input {
     width: 16px;

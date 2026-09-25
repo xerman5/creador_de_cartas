@@ -9,7 +9,7 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
   { key: 'rules', label: 'Texto de reglas', hint: 'Lo que hace la carta. Admite iconos: {ataque}.' },
   { key: 'flavor', label: 'Texto de ambientación', hint: 'Una frase en cursiva que no afecta al juego.' },
   { key: 'cost', label: 'Coste', hint: 'Un número en una esquina: lo que cuesta jugarla.' },
-  { key: 'stats', label: 'Atributos', hint: 'Números con icono que cambian en cada carta: Ataque 3, Vida 5…' },
+  { key: 'stats', label: 'Atributos y habilidades', hint: 'Iconos con número (Ataque 3, Vida 5) o solo icono (Volar, Veneno).' },
   { key: 'variant', label: 'Rareza, clan o facción', hint: 'Una categoría con su color: común/rara, un clan, una facción…' },
   { key: 'number', label: 'Número de colección', hint: '«012/120» en el pie de la carta.' },
 ];
@@ -33,10 +33,21 @@ export interface TypeAnswer {
   cards?: CardData[];
 }
 
+/** `number`: icono con un número que cambia en cada carta (Ataque 3). `icon`: solo icono, la carta lo tiene o no (Volar). */
+export type AttrKind = 'number' | 'icon';
+
 export interface AttrAnswer {
   label: string;
   color: string;
+  kind?: AttrKind;
+  /** Icono propio: ruta dentro de assets/ (`iconos/volar.png`). Sin él se usa uno provisional de su color. */
+  icon?: string;
 }
+
+export const isAbility = (at: Pick<AttrAnswer, 'kind'> | undefined) => at?.kind === 'icon';
+
+/** ¿Una celda de habilidad dice que la carta la tiene? Vacío, «no», «0» o «-» es que no. */
+export const flagOn = (v: string | undefined) => !!v?.trim() && !/^(no|n|0|false|falso|-)$/i.test(v.trim());
 
 export type DesignId = 'clasico' | 'completa' | 'retrato' | 'texto';
 
@@ -119,6 +130,8 @@ export interface WizardAnswers {
   adjust: Adjust;
   backs: 'common' | 'per-type' | 'none';
   fine: FineTune;
+  /** Icono propio del coste (ruta dentro de assets/). */
+  costIcon?: string;
 }
 
 export function defaultAnswers(): WizardAnswers {
@@ -182,7 +195,7 @@ export const attrKey = (a: Pick<AttrAnswer, 'label'>) => normalizeKey(a.label);
 export function resolvedType(
   answers: WizardAnswers,
   t: TypeAnswer,
-): { declared: Set<ElementKey>; elements: Set<ElementKey>; attributes: string[] } {
+): { declared: Set<ElementKey>; elements: Set<ElementKey>; attributes: string[]; stats: string[]; abilities: string[] } {
   let cur = t;
   const seen = new Set<string>();
   while (cur.sameAs && !seen.has(typeKey(cur))) {
@@ -193,11 +206,14 @@ export function resolvedType(
   }
   // El orden de dibujo es el de la lista de atributos del juego, no el orden en que se marcaron.
   const chosen = new Set(cur.attributes.map(normalizeKey));
-  const attributes = answers.attributes.map(attrKey).filter((k) => k && chosen.has(k));
+  const picked = answers.attributes.filter((at) => attrKey(at) && chosen.has(attrKey(at)));
+  const attributes = picked.map(attrKey);
   const declared = new Set(cur.elements);
   const elements = new Set(cur.elements);
   if (!attributes.length) elements.delete('stats');
-  return { declared, elements, attributes };
+  const stats = picked.filter((at) => !isAbility(at)).map(attrKey);
+  const abilities = picked.filter(isAbility).map(attrKey);
+  return { declared, elements, attributes, stats, abilities };
 }
 
 /** Nombre de archivo seguro a partir de una etiqueta. */

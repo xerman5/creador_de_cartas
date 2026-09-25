@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import Papa from 'papaparse';
 import { defaultAnswers, type WizardAnswers } from './answers';
 import { buildProject } from './build';
 import { fillCsv, importCsv, tableColumns } from './table';
@@ -80,5 +81,43 @@ describe('fillCsv + importCsv', () => {
     const a = game({ langs: ['es', 'en'] });
     const { types } = importCsv(a, 'tipo,titulo,titulo-en,titulo-fr\nLugar,Playa,Beach,Plage\n');
     expect(types[1].cards).toEqual([{ 'titulo-es': 'Playa', 'titulo-en': 'Beach' }]);
+  });
+});
+
+describe('habilidades (solo icono)', () => {
+  function withAbilities(): WizardAnswers {
+    const a = game();
+    a.attributes = [...a.attributes, { label: 'Volar', color: '#3d8fe0', kind: 'icon' }];
+    a.types[0].attributes = ['ataque', 'vida', 'volar'];
+    return a;
+  }
+
+  it('son una columna de casilla; en el CSV, «x» o vacío', () => {
+    const a = withAbilities();
+    const col = tableColumns(a, [a.types[0]]).find((c) => c.key === 'attr:volar');
+    expect(col).toMatchObject({ kind: 'flag', header: 'volar', label: 'Volar' });
+    a.types[0].cards = [{ titulo: 'Cuervos', 'attr:volar': 'sí' }, { titulo: 'Lobos', 'attr:volar': 'no' }];
+    const lines = fillCsv(a).split('\r\n');
+    const volar = lines[0].replace('﻿', '').split(';').indexOf('volar');
+    expect(lines[1].split(';')[volar]).toBe('x');
+    expect(lines[2].split(';')[volar]).toBe('');
+  });
+
+  it('al importar, cualquier «sí» cuenta y «no» o vacío no; también desde la columna atributos', () => {
+    const a = withAbilities();
+    const { types } = importCsv(a, 'tipo;titulo;volar\nClan;A;Sí\nClan;B;no\nClan;C;\n');
+    expect(types[0].cards!.map((c) => c['attr:volar'])).toEqual(['x', undefined, undefined]);
+    const combined = importCsv(a, 'tipo,titulo,atributos\nClan,A,ataque:3 | volar\nClan,B,ataque:2\n');
+    expect(combined.types[0].cards!.map((c) => [c['attr:ataque'], c['attr:volar']])).toEqual([['3', 'x'], ['2', undefined]]);
+  });
+
+  it('en el proyecto: la habilidad va sin número; las cartas sin rellenar llevan de ejemplo', () => {
+    const a = withAbilities();
+    a.types[0].cards = [{ titulo: 'Cuervos', 'attr:volar': 'x' }, { titulo: 'Lobos' }];
+    const rows = Papa.parse<Record<string, string>>(buildProject(a).csv, { header: true }).data;
+    expect(rows[0].atributos).toMatch(/^coste:\d \| ataque:\d \| vida:\d \| volar$/);
+    expect(rows[1].atributos).not.toContain('volar');
+    // La tercera no tiene nada escrito: ejemplo alterno (carta 3 → sí).
+    expect(rows[2].atributos).toMatch(/\| volar$/);
   });
 });

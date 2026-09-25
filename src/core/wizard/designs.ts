@@ -8,8 +8,10 @@ export interface LayoutInput {
   adjust: Adjust;
   /** Clave del tipo: nombre de su ilustración provisional. */
   tipo: string;
-  /** Atributos de la lista (sin el coste). */
+  /** Atributos con número (sin el coste). */
   statKeys: string[];
+  /** Habilidades: atributos de solo icono, en su propia fila. */
+  abilityKeys?: string[];
   /** Columna del CSV con la rareza o facción. */
   variantColumn: string;
 }
@@ -56,6 +58,10 @@ class Layout {
   readonly iw: number;
   readonly radius: number;
   readonly has: (e: ElementKey) => boolean;
+  /** Hay habilidades (solo icono) que dibujar. */
+  readonly hasAb: boolean;
+  /** Alto de la fila de habilidades. */
+  readonly abH: number;
   readonly titleFont: string;
   readonly bodyFont: string;
 
@@ -72,7 +78,10 @@ class Layout {
     this.y1 = H - m;
     this.iw = this.x1 - this.x0;
     this.radius = inp.adjust.rounded ? 1.8 * this.f : 0;
-    this.has = (e) => inp.elements.has(e);
+    // «stats» es la lista de números; las habilidades van aparte.
+    this.has = (e) => (e === 'stats' ? inp.elements.has('stats') && inp.statKeys.length > 0 : inp.elements.has(e));
+    this.hasAb = inp.elements.has('stats') && (inp.abilityKeys?.length ?? 0) > 0;
+    this.abH = 6.5 * this.f;
     const pair = FONT_PAIRS[inp.adjust.fonts] ?? FONT_PAIRS.clasica;
     this.titleFont = pair.title;
     this.bodyFont = pair.body;
@@ -219,6 +228,36 @@ class Layout {
     this.zones.push(z);
   }
 
+  /** Fila de habilidades: solo iconos (con su valor al lado si la carta lo tiene). */
+  private abilities(r: Rect, align: AttributesZone['align']) {
+    const keys = this.inp.abilityKeys ?? [];
+    const n = Math.max(1, keys.length);
+    const gap = r2(0.8 * this.f);
+    // El fondo de cada icono sobresale un 10 %: se deja sitio para él.
+    const icon = r2(Math.max(2, Math.min((r.h - 0.4 * this.f) / 1.2, 5.5 * this.f, (r.w - gap * (n - 1)) / (n * 1.2))));
+    this.zones.push({
+      id: 'habilidades',
+      type: 'attributes',
+      bind: 'atributos',
+      keys: [...keys],
+      direction: 'row',
+      align,
+      gap,
+      iconSize: icon,
+      valuePosition: 'after',
+      font: this.valueFont(icon * 0.8),
+      backdrop: 'papel',
+      backdropOpacity: 0.85,
+      rect: r,
+    });
+  }
+
+  /** Habilidades sobre el borde inferior de la ilustración, entre `xa` y `xb`. */
+  private abilitiesOnArt(art: Rect, xa: number, xb: number, align: AttributesZone['align'], bottom = art.y + art.h - this.f) {
+    const h = Math.min(this.abH, bottom - art.y - this.f);
+    this.abilities(box(xa, bottom - h, xb - xa, h), align);
+  }
+
   /** ¿Caben los atributos en una columna de esta altura con iconos legibles? */
   private columnFits(h: number): boolean {
     const n = Math.max(1, this.inp.statKeys.length);
@@ -298,7 +337,9 @@ class Layout {
     const hasText = this.has('rules') || this.has('flavor');
     const subH = 5.2 * f;
     const rowH = 9 * f;
-    const availFor = (row: boolean) => yb - y - (this.has('subtitle') ? subH + g : 0) - (row ? rowH + g : 0);
+    // Sin ilustración, las habilidades van en su propia fila.
+    const abRow = this.hasAb && !this.has('art');
+    const availFor = (row: boolean) => yb - y - (this.has('subtitle') ? subH + g : 0) - (row ? rowH + g : 0) - (abRow ? this.abH + g : 0);
 
     let side = this.has('stats') && this.has('art') && a.attrSide !== 'bottom';
     let { artH, textH } = this.split(availFor(!side && this.has('stats')), a.art, hasText);
@@ -310,13 +351,19 @@ class Layout {
     const row = this.has('stats') && !side;
 
     if (this.has('art')) {
-      this.art(box(x0, y, iw, artH));
+      const artBox = box(x0, y, iw, artH);
+      this.art(artBox);
+      const cw = 11.5 * f;
+      const cx = a.attrSide === 'left' ? x0 + 1.2 * f : x1 - 1.2 * f - cw;
       if (side) {
-        const cw = 11.5 * f;
-        const cx = a.attrSide === 'left' ? x0 + 1.2 * f : x1 - 1.2 * f - cw;
         const col = box(cx, y + 1.2 * f, cw, artH - 2.4 * f);
         this.shape('fondo atributos', col, 'tinta', { opacity: 0.55 });
         this.stats(col, 'column');
+      }
+      if (this.hasAb) {
+        if (side && a.attrSide === 'left') this.abilitiesOnArt(artBox, cx + cw + f, x1 - 1.2 * f, 'end');
+        else if (side) this.abilitiesOnArt(artBox, x0 + 1.2 * f, cx - f, 'start');
+        else this.abilitiesOnArt(artBox, x0 + 1.2 * f, x1 - 1.2 * f, 'end');
       }
       y += artH + g;
     }
@@ -324,6 +371,10 @@ class Layout {
       this.shape('banda tipo', box(x0, y, iw, subH), 'papel');
       this.subtitle(box(x0 + f, y, iw - 2 * f, subH), 'tinta');
       y += subH + g;
+    }
+    if (abRow) {
+      this.abilities(box(x0, y, iw, this.abH), 'center');
+      y += this.abH + g;
     }
     if (row) {
       const r = box(x0, y, iw, rowH);
@@ -355,6 +406,8 @@ class Layout {
     const minPanel = (this.has('subtitle') ? subH + g : 0) + (hasText ? 16 * f : 0) + numH + 2 * f;
     let panelH = hasText || this.has('subtitle') || this.has('number') ? Math.max(minPanel, innerH * (1 - a.art)) : 0;
     panelH = Math.min(panelH, innerH * 0.75);
+    // Las habilidades van en la ilustración, justo encima del panel: que quepan.
+    if (this.hasAb) panelH = Math.max(Math.min(panelH, innerH - this.abH - 3 * g), Math.min(minPanel, panelH));
     // Sin sitio para la columna: los atributos pasan a una fila dentro del panel.
     if (side && innerH - panelH - 2 * g < 14 * f) side = false;
     const row = this.has('stats') && !side;
@@ -363,12 +416,19 @@ class Layout {
 
     const pTop = y1 - panelH;
     if (panelH) this.shape('panel', box(x0, pTop, iw, panelH), 'tinta', { opacity: 0.78 });
+    const cw = 11.5 * f;
+    const cx = a.attrSide === 'left' ? x0 : x1 - cw;
     if (side) {
-      const cw = 11.5 * f;
-      const cx = a.attrSide === 'left' ? x0 : x1 - cw;
       const col = box(cx, top, cw, pTop - g - top);
       this.shape('fondo atributos', col, 'tinta', { opacity: 0.55 });
       this.stats(col, 'column');
+    }
+    if (this.hasAb) {
+      const free = box(x0, top, iw, pTop - g - top);
+      const bottom = pTop - g;
+      if (side && a.attrSide === 'left') this.abilitiesOnArt(free, cx + cw + f, x1 - f, 'end', bottom);
+      else if (side) this.abilitiesOnArt(free, x0 + f, cx - f, 'start', bottom);
+      else this.abilitiesOnArt(free, x0 + f, x1 - f, 'end', bottom);
     }
 
     let y = pTop + f;
@@ -400,13 +460,14 @@ class Layout {
     const rowH = 9 * f;
     const row = this.has('stats') && !side;
     const hasText = this.has('rules') || this.has('flavor');
+    const abRow = this.hasAb && !this.has('art');
 
     let yb = y1;
     if (this.has('number')) {
       this.number(box(x0, yb - 2.6 * f, iw, 2.6 * f), 'papel');
       yb -= 3.2 * f;
     }
-    const fixed = plateH + g + (this.has('subtitle') ? subH + g : 0) + (row ? rowH + g : 0);
+    const fixed = plateH + g + (this.has('subtitle') ? subH + g : 0) + (row ? rowH + g : 0) + (abRow ? this.abH + g : 0);
     const avail = yb - y0 - fixed;
     const { artH } = this.split(avail + g, a.art, hasText);
 
@@ -418,9 +479,21 @@ class Layout {
       const gd = 3.6 * f;
       const costLeft = a.costCorner === 'left';
       if (this.has('cost')) this.cost(costLeft ? cx0 + 0.9 * f : cx1 - 0.9 * f - cs, y + 0.9 * f, cs);
-      if (this.has('variant')) {
-        const gemLeft = this.has('cost') && !costLeft;
-        this.gem(gemLeft ? cx0 + 1.4 * f : cx1 - 1.4 * f - gd, y + 1.4 * f, gd);
+      const gemLeft = this.has('cost') && !costLeft;
+      if (this.has('variant')) this.gem(gemLeft ? cx0 + 1.4 * f : cx1 - 1.4 * f - gd, y + 1.4 * f, gd);
+      if (this.hasAb) {
+        // Encima de la placa; si llegan a la altura del coste y la marca, se apartan de esas esquinas.
+        const bottom = y + artH - plateH * 0.45 - 0.8 * f;
+        const low = bottom - this.abH > y + 0.9 * f + cs + 0.3 * f;
+        let xa = cx0 + f;
+        let xb = cx1 - f;
+        if (!low) {
+          const leftUsed = (this.has('cost') && costLeft) || (this.has('variant') && gemLeft);
+          const rightUsed = (this.has('cost') && !costLeft) || (this.has('variant') && !gemLeft);
+          if (leftUsed) xa = cx0 + 0.9 * f + cs + f;
+          if (rightUsed) xb = cx1 - 0.9 * f - cs - f;
+        }
+        this.abilitiesOnArt(box(cx0, y, cx1 - cx0, artH), xa, xb, 'center', bottom);
       }
       y += artH - plateH * 0.45;
       this.shape('placa', box(cx0 + f, y, cx1 - cx0 - 2 * f, plateH), 'papel', { stroke: 'acento', strokeWidth: r2(0.4 * f) });
@@ -439,6 +512,10 @@ class Layout {
     if (this.has('subtitle')) {
       this.subtitle(box(x0, y, iw, subH), 'papel', 'center');
       y += subH + g;
+    }
+    if (abRow) {
+      this.abilities(box(x0, y, iw, this.abH), 'center');
+      y += this.abH + g;
     }
     if (row) {
       const r = box(x0, y, iw, rowH);
@@ -482,6 +559,10 @@ class Layout {
       this.stats(r, 'row');
       yb -= rowH + g;
     }
+    if (this.hasAb && !this.has('art')) {
+      this.abilities(box(ix0, yb - this.abH, iw, this.abH), 'center');
+      yb -= this.abH + g;
+    }
     if (this.has('flavor')) {
       const fh = 9 * f;
       this.flavor(box(ix0, yb - fh, iw, fh), 'principal', 7);
@@ -491,7 +572,9 @@ class Layout {
       // En este diseño manda el texto: la ilustración es secundaria salvo que no haya reglas.
       const free = yb - y;
       const artH = this.has('rules') ? Math.max(13 * f, Math.min(free * a.art * 0.7, free - g - 15 * f)) : free;
-      this.art(box(ix0, y, iw, artH));
+      const artBox = box(ix0, y, iw, artH);
+      this.art(artBox);
+      if (this.hasAb) this.abilitiesOnArt(artBox, ix0 + f, ix1 - f, 'end');
       y += artH + g;
     }
     if (this.has('rules')) {

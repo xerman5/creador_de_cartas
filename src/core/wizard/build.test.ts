@@ -135,3 +135,22 @@ describe('withDefaults', () => {
     expect(withDefaults(null)).toEqual(defaultAnswers());
   });
 });
+
+describe('iconos y habilidades', () => {
+  it('un icono propio sustituye al provisional; las habilidades tienen su zona', async () => {
+    const a = rich({ langs: ['es'] });
+    a.attributes = [
+      { label: 'Ataque', color: '#d9534f', icon: 'iconos/espada.png' },
+      { label: 'Vida', color: '#4caf50' },
+      { label: 'Volar', color: '#3d8fe0', kind: 'icon' },
+    ];
+    a.types[0].attributes = ['ataque', 'vida', 'volar'];
+    const { built, lp } = await load(a);
+    expect(lp.project.attributes.ataque.icon).toBe('iconos/espada.png');
+    expect(built.files['assets/provisional/iconos/ataque.svg']).toBeUndefined();
+    expect(lp.project.attributes.volar.icon).toBe('provisional/iconos/volar.svg');
+    const zones = lp.project.templates.criatura.zones;
+    expect(zones.find((z) => z.id === 'atributos')).toMatchObject({ keys: ['ataque', 'vida'] });
+    expect(zones.find((z) => z.id === 'habilidades')).toMatchObject({ keys: ['volar'] });
+  });
+});

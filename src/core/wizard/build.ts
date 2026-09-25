@@ -1,7 +1,7 @@
 import Papa from 'papaparse';
 import { layoutZones, artPath } from './designs';
 import { artSvg, backSvg, costSvg, iconSvg, shiftColor } from './art';
-import { attrKey, fileKey, resolvedType, textKey, typeKey, type CardData, type ElementKey, type FineTune, type WizardAnswers } from './answers';
+import { attrKey, fileKey, flagOn, resolvedType, textKey, typeKey, type CardData, type ElementKey, type FineTune, type WizardAnswers } from './answers';
 import { DEFAULT_SAFE_MM } from '../card';
 import { PROJECT_FILE, serializeProject } from '../project';
 import { normalizeKey } from '../text';
@@ -35,6 +35,10 @@ const KNOWN_SHAPES: Record<string, number> = { ataque: 0, fuerza: 0, dano: 0, vi
 function shapeIndex(key: string): number {
   return KNOWN_SHAPES[key] ?? [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 8;
 }
+
+/** Icono provisional de un atributo (el que se usa si no se sube uno propio). */
+export const provisionalIcon = (key: string, color: string, ink: string) => iconSvg(shapeIndex(key), color, ink);
+export { costSvg };
 
 /** Todos los archivos del proyecto, listos para escribir en una carpeta o en un zip. */
 export function projectFiles(built: BuiltProject): Record<string, string> {
@@ -156,13 +160,20 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   if (any('stats')) a.attributes.forEach((at) => {
     const key = attrKey(at);
     if (!key || attributes[key]) return;
-    const icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
-    files[`assets/${icon}`] = iconSvg(shapeIndex(key), at.color, palette.tinta);
+    // El icono propio lo aporta quien llama (los archivos subidos); si no, uno provisional de su color.
+    let icon = at.icon?.trim();
+    if (!icon) {
+      icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
+      files[`assets/${icon}`] = iconSvg(shapeIndex(key), at.color, palette.tinta);
+    }
     attributes[key] = { icon, label: at.label.trim() };
   });
   if (usesCost && !attributes[COST_KEY]) {
-    const icon = `${PROVISIONAL_DIR}iconos/coste.svg`;
-    files[`assets/${icon}`] = costSvg(palette);
+    let icon = a.costIcon?.trim();
+    if (!icon) {
+      icon = `${PROVISIONAL_DIR}iconos/coste.svg`;
+      files[`assets/${icon}`] = costSvg(palette);
+    }
     attributes[COST_KEY] = { icon, label: 'Coste' };
   }
 
@@ -182,7 +193,8 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
         size,
         adjust: a.adjust,
         tipo: key,
-        statKeys: r.attributes,
+        statKeys: r.stats,
+        abilityKeys: r.abilities,
         variantColumn: variantCol,
       }),
       a.fine,
@@ -241,6 +253,8 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       // Lo que el usuario escribió manda; lo vacío se rellena con ejemplos (y queda como pendiente).
       const data: CardData = t.cards?.[k - 1] ?? {};
       const own = (key: string) => (data[key] ?? '').trim();
+      // Una carta sin nada escrito lleva habilidades de ejemplo; en cuanto se rellena, solo las marcadas.
+      const untouched = !Object.entries(data).some(([key, v]) => !['id', 'ilustracion', 'copias'].includes(key) && v.trim());
       const row: Record<string, string> = { id: own('id') || `${pre[i]}-${String(k).padStart(3, '0')}`, tipo: t.label.trim() };
       for (const l of langs) {
         const ph = PLACEHOLDERS[l] ?? PLACEHOLDERS.es;
@@ -252,7 +266,12 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       }
       const attrs: string[] = [];
       if (r.elements.has('cost')) attrs.push(`${COST_KEY}:${own('coste') || ((k - 1) % 5) + 1}`);
-      if (r.elements.has('stats')) r.attributes.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
+      if (r.elements.has('stats')) {
+        r.stats.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
+        r.abilities.forEach((key, j) => {
+          if (untouched ? (k + j) % 2 === 1 : flagOn(own(`attr:${key}`))) attrs.push(key);
+        });
+      }
       if (attrs.length) row.atributos = attrs.join(' | ');
       if (r.elements.has('variant') && a.variant.values.length)
         row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;

@@ -2,7 +2,7 @@ import Papa from 'papaparse';
 import { parseAttributes } from '../attributes';
 import { parseCsv } from '../csv';
 import { normalizeKey } from '../text';
-import { attrKey, resolvedType, textKey, typeKey, type CardData, type TypeAnswer, type WizardAnswers } from './answers';
+import { attrKey, flagOn, isAbility, resolvedType, textKey, typeKey, type CardData, type TypeAnswer, type WizardAnswers } from './answers';
 import { BACK_TEMPLATE, cardIds, PLACEHOLDERS } from './build';
 
 export interface TableColumn {
@@ -11,7 +11,8 @@ export interface TableColumn {
   /** Cabecera en el CSV para rellenar. */
   header: string;
   label: string;
-  kind: 'id' | 'text' | 'long' | 'number' | 'variant' | 'image';
+  /** `flag`: habilidad, la carta la tiene («x») o no (vacío). */
+  kind: 'id' | 'text' | 'long' | 'number' | 'flag' | 'variant' | 'image';
 }
 
 const TEXT_FIELDS = [
@@ -40,7 +41,7 @@ export function tableColumns(a: WizardAnswers, types: TypeAnswer[], lang?: strin
     const used = new Set(res.flatMap((r) => r.attributes));
     for (const at of a.attributes) {
       const k = attrKey(at);
-      if (used.has(k)) cols.push({ key: `attr:${k}`, header: k, label: at.label, kind: 'number' });
+      if (used.has(k)) cols.push({ key: `attr:${k}`, header: k, label: at.label, kind: isAbility(at) ? 'flag' : 'number' });
     }
   }
   if (has('variant')) cols.push({ key: 'variante', header: normalizeKey(a.variant.column || 'rareza'), label: a.variant.column || 'Rareza', kind: 'variant' });
@@ -62,7 +63,8 @@ export function fillCsv(a: WizardAnswers): string {
     for (let k = 0; k < t.count; k++) {
       const data = t.cards?.[k] ?? {};
       // La primera columna es siempre «id»; «tipo» va justo detrás.
-      rows.push([data.id?.trim() || ids[i](k + 1), t.label.trim(), ...cols.slice(1).map((c) => data[c.key] ?? '')]);
+      const value = (c: TableColumn) => (c.kind === 'flag' ? (flagOn(data[c.key]) ? 'x' : '') : (data[c.key] ?? ''));
+      rows.push([data.id?.trim() || ids[i](k + 1), t.label.trim(), ...cols.slice(1).map(value)]);
     }
   });
   const fields = ['id', 'tipo', ...cols.slice(1).map((c) => c.header)];
@@ -93,6 +95,12 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
   const csv = parseCsv(text);
   const variantCol = normalizeKey(a.variant.column || 'rareza');
   const attrKeys = new Set(a.attributes.map(attrKey).filter(Boolean));
+  const abilities = new Set(a.attributes.filter(isAbility).map(attrKey));
+  /** Las habilidades se guardan como «x»; los atributos con número, con su valor. */
+  const setAttr = (d: CardData, key: string, v: string) => {
+    if (!abilities.has(key)) d[`attr:${key}`] = v;
+    else if (flagOn(v)) d[`attr:${key}`] = 'x';
+  };
   const report: ImportReport = { byType: {}, unknownTypes: [], ignored: [] };
 
   // Qué hace cada columna del CSV.
@@ -107,10 +115,13 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
       else report.ignored.push(header);
     } else if (header === 'atributos') {
       mapping.set(header, (d, v) => {
-        for (const it of parseAttributes(v)) d[it.key === 'coste' ? 'coste' : `attr:${it.key}`] = it.value;
+        for (const it of parseAttributes(v)) {
+          if (it.key === 'coste') d.coste = it.value;
+          else setAttr(d, it.key, abilities.has(it.key) ? 'x' : it.value);
+        }
       });
     } else if (header === 'coste') mapping.set(header, (d, v) => (d.coste = v));
-    else if (attrKeys.has(header)) mapping.set(header, (d, v) => (d[`attr:${header}`] = v));
+    else if (attrKeys.has(header)) mapping.set(header, (d, v) => setAttr(d, header, v));
     else if (header === variantCol || VARIANT_NAMES.includes(header)) mapping.set(header, (d, v) => (d.variante = v));
     else if (base === 'ilustracion') mapping.set(header, (d, v) => (d.ilustracion = v));
     else if (header === 'copias') mapping.set(header, (d, v) => (d.copias = v));

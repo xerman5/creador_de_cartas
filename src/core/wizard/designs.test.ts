@@ -37,9 +37,11 @@ describe('layoutZones: todas las combinaciones', () => {
     let n = 0;
     for (const c of combos()) {
       n++;
-      const statKeys = ['ataque', 'defensa', 'vida', 'velocidad'].slice(0, 1 + (n % 4));
-      const zones = layoutZones({ ...c, tipo: 'criatura', statKeys, variantColumn: 'rareza' });
-      const where = `${c.design} ${c.size.width}×${c.size.height} [${[...c.elements].join(',')}] ${c.adjust.attrSide}/${c.adjust.costCorner}/${c.adjust.art}`;
+      // Números y habilidades en cantidades distintas, incluida ninguna de una de las dos.
+      const statKeys = ['ataque', 'defensa', 'vida', 'velocidad'].slice(0, n % 5);
+      const abilityKeys = ['volar', 'veneno', 'sigilo'].slice(0, (n >> 1) % 4);
+      const zones = layoutZones({ ...c, tipo: 'criatura', statKeys, abilityKeys, variantColumn: 'rareza' });
+      const where = `${c.design} ${c.size.width}×${c.size.height} [${[...c.elements].join(',')}] ${c.adjust.attrSide}/${c.adjust.costCorner}/${c.adjust.art} ${statKeys.length}+${abilityKeys.length}`;
       const f = Math.min(c.size.width / 63, c.size.height / 88);
 
       for (const i of safeAreaIssues({ zones }, c.size)) problems.push(`${where}: ${i.message}`);
@@ -100,6 +102,34 @@ describe('layoutZones: todas las combinaciones', () => {
         const ids = zones.map((z) => z.id);
         expect(ids, `${design}/${el}`).toContain(expected[el]);
         for (const other of ALL.filter((o) => o !== el)) expect(ids, `${design}/${el}`).not.toContain(expected[other]);
+      }
+    }
+  });
+
+  it('las habilidades van en su propia zona, sin número, con o sin ilustración', () => {
+    for (const design of DESIGNS.map((d) => d.id)) {
+      for (const art of [true, false]) {
+        const zones = layoutZones({
+          design,
+          elements: new Set<ElementKey>(art ? ['art', 'stats', 'rules'] : ['stats', 'rules']),
+          size: SIZES[0],
+          adjust: defaultAnswers().adjust,
+          tipo: 't',
+          statKeys: [],
+          abilityKeys: ['volar', 'veneno'],
+          variantColumn: 'rareza',
+        });
+        const ids = zones.map((z) => z.id);
+        expect(ids, `${design}/${art}`).toContain('habilidades');
+        expect(ids, `${design}/${art}`).not.toContain('atributos');
+        const ab = zones.find((z) => z.id === 'habilidades');
+        expect(ab).toMatchObject({ type: 'attributes', keys: ['volar', 'veneno'], direction: 'row' });
+        if (art) {
+          // Sobre la ilustración: no le quita sitio al texto.
+          const img = zones.find((z) => z.id === 'ilustracion')!.rect;
+          expect(ab!.rect.y).toBeGreaterThanOrEqual(img.y);
+          expect(ab!.rect.y + ab!.rect.h).toBeLessThanOrEqual(img.y + img.h + 0.01);
+        }
       }
     }
   });
