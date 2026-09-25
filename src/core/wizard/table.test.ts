@@ -56,7 +56,8 @@ describe('fillCsv + importCsv', () => {
     const a = game();
     const { types } = importCsv(a, buildProject(a).csv);
     const first = types[0].cards![0];
-    expect(first.titulo).toBe('Clan 1');
+    // «Clan 1» es el título de relleno del asistente: no se importa como dato.
+    expect(first.titulo).toBeUndefined();
     expect(first.descripcion).toBeUndefined();
     expect(first.coste).toBe('1');
     expect(first['attr:ataque']).toMatch(/^\d$/);

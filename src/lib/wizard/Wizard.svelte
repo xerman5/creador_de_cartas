@@ -1,7 +1,9 @@
 <script lang="ts">
   import { DirectorySource, MemorySource, type FileSource } from '../../core/assets';
   import { downloadBlob, saveZip, slug } from '../../core/export';
-  import { PROJECT_FILE, type LoadedProject } from '../../core/project';
+  import { PROJECT_FILE, serializeProject, type LoadedProject } from '../../core/project';
+  import { applyAll, handEdited, newWizardFile, WIZARD_FILE, wizardFileJson } from '../../core/wizard/sync';
+  import type { ResumeContext } from './resume';
   import type { RenderOptions } from '../../core/render';
   import { normalizeKey } from '../../core/text';
   import {
@@ -48,7 +50,16 @@
     saveDraftResources,
   } from './preview';
 
-  let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
+  let {
+    oncreate,
+    oncancel,
+    resume = null,
+  }: {
+    oncreate: (src: FileSource, note?: string) => void;
+    oncancel: () => void;
+    /** Retomar el asistente sobre un proyecto ya creado (si no, se crea uno nuevo). */
+    resume?: ResumeContext | null;
+  } = $props();
 
   const STEPS = [
     { id: 'proyecto', title: 'Tu juego' },
@@ -76,10 +87,17 @@
     ['pt', 'Portugués'],
   ];
 
-  const draft = loadDraft();
-  let answers = $state<WizardAnswers>(draft?.answers ?? defaultAnswers());
-  let step = $state(stepIndex(draft?.step ?? 0));
-  let reached = $state(stepIndex(draft?.step ?? 0));
+  // Al retomar un proyecto no se usa el borrador del navegador: el proyecto es la fuente de verdad.
+  // svelte-ignore state_referenced_locally
+  const start = resume;
+  const draft = start ? null : loadDraft();
+  // Retomando, se vuelve adonde se dejó; si se dejó al crear, al recorrido (lo más probable es retocar).
+  const firstStep = start ? (start.file.step === 'crear' ? 'recorrido' : start.file.step) : (draft?.step ?? 0);
+  let answers = $state<WizardAnswers>(start?.answers ?? draft?.answers ?? defaultAnswers());
+  let step = $state(stepIndex(firstStep));
+  let reached = $state(start ? STEPS.length - 1 : stepIndex(firstStep));
+  /** Respuestas al entrar, para saber si hay cambios sin aplicar. */
+  const initial = JSON.stringify(start?.answers ?? null);
   let current = $state(0);
   /** Carta seleccionada en la tabla (índice dentro del tipo actual). */
   let row = $state(0);
@@ -115,7 +133,7 @@
     const sid = stepId;
     let cancelled = false;
     const t = setTimeout(async () => {
-      saveDraft(snap, sid);
+      if (!start) saveDraft(snap, sid);
       try {
         const lp = await previewProject(snap, { focus: f, images, resources: res });
         if (cancelled) return lp.assets.dispose();
@@ -268,7 +286,12 @@
 
   // ------------------------------------------------------------ progreso
 
-  let notice = $state('');
+  let notice = $state(
+    start
+      ? `Retomas el asistente de «${start.answers.name}». Cambia lo que quieras y, al final, «Aplicar».` +
+          (start.notes.length ? ` Se han traído los cambios hechos fuera del asistente: ${start.notes.join(', ')}.` : '')
+      : '',
+  );
   let progressInput: HTMLInputElement;
 
   async function saveProgress() {
@@ -296,12 +319,13 @@
   // ------------------------------------------------------------ recursos (iconos y fondos)
 
   /** Iconos y fondos subidos: van al proyecto y al archivo de progreso. */
-  let resources = $state.raw<Resources>(new Map());
+  let resources = $state.raw<Resources>(start?.resources ?? new Map());
   let resourceUrls = $state.raw<Map<string, string>>(new Map());
   // Al abrir, los del borrador de este navegador (si no se ha cargado ya otra cosa).
-  loadDraftResources().then((r) => {
-    if (!resources.size && r.size) resources = r;
-  });
+  if (!start)
+    loadDraftResources().then((r) => {
+      if (!resources.size && r.size) resources = r;
+    });
 
   $effect(() => {
     const m = new Map([...resources].map(([p, b]) => [p, URL.createObjectURL(b)]));
@@ -311,7 +335,7 @@
 
   function setResources(next: Resources) {
     resources = next;
-    saveDraftResources(next);
+    if (!start) saveDraftResources(next);
   }
 
   /** Copia archivos a un estante y devuelve sus rutas (en el mismo orden). */
@@ -479,7 +503,7 @@
   const fileKeyOf = (label: string | undefined) => fileKey(label?.trim() || 'criatura');
 
   /** Ruta dentro de la carpeta elegida → archivo. Solo en memoria: no se guarda en el borrador. */
-  let imageMap = $state.raw<Map<string, File>>(new Map());
+  let imageMap = $state.raw<Map<string, Blob>>(start?.images ?? new Map());
   let byOrder = $state(true);
   let match = $state.raw<MatchResult | null>(null);
   let folderInput: HTMLInputElement;
@@ -570,7 +594,66 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
     const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
-    return { ...projectFiles(buildProject(snap)), ...resourceFiles(resources), ...imageFiles(images) };
+    const built = buildProject(snap);
+    return {
+      ...projectFiles(built),
+      ...resourceFiles(resources),
+      ...imageFiles(images),
+      // Con él, el proyecto se puede retomar después en el asistente.
+      [WIZARD_FILE]: newWizardFile(built, snap, 'crear'),
+    };
+  }
+
+  // ------------------------------------------------------------ retomar un proyecto
+
+  const writable = !!start?.source.write;
+  const changed = $derived(!!start && JSON.stringify($state.snapshot(answers)) !== initial);
+  /** Plantillas retocadas a mano que el asistente cambiaría: se pregunta qué hacer con cada una. */
+  const conflicts = $derived.by(() => {
+    if (!start || stepId !== 'crear') return [];
+    return handEdited(start.project, buildProject($state.snapshot(answers) as WizardAnswers).project, start.file.generated);
+  });
+  /** Plantillas retocadas que se regeneran (por defecto se conservan). */
+  let regenerate = $state<string[]>([]);
+
+  /** Recursos nuevos (o cambiados) respecto a lo que ya había en la carpeta. */
+  function freshFiles(): Record<string, Blob> {
+    const res = new Map([...resources].filter(([p, b]) => start?.resources.get(p) !== b));
+    const img = new Map([...imageMap].filter(([p, b]) => start?.images.get(p) !== b));
+    return { ...resourceFiles(res), ...imageFiles(img) };
+  }
+
+  /** Guarda las respuestas en la carpeta sin tocar el proyecto: se seguirá desde aquí. */
+  const saveInProject = () =>
+    run('Guardando…', async () => {
+      if (!start?.source.write) return;
+      await start.source.requestWrite?.();
+      for (const [path, data] of Object.entries(freshFiles())) await start.source.write(path, data);
+      const snap = $state.snapshot(answers) as WizardAnswers;
+      await start.source.write(WIZARD_FILE, wizardFileJson({ answers: snap, step: stepId, generated: start.file.generated }));
+      notice = 'Guardado en la carpeta del proyecto, sin aplicar: la próxima vez que abras el asistente seguirás aquí.';
+    });
+
+  const applyToProject = () =>
+    run('Aplicando…', async () => {
+      const src = start?.source;
+      if (!start || !src?.write) return;
+      const write = src.write.bind(src);
+      await src.requestWrite?.();
+      const snap = $state.snapshot(answers) as WizardAnswers;
+      const built = buildProject(snap);
+      const keep = new Set(conflicts.filter((k) => !regenerate.includes(k)));
+      const res = applyAll({ project: start.project }, start.csv, built, snap, 'crear', start.file.generated, keep);
+      for (const [path, data] of Object.entries({ ...built.files, ...freshFiles() })) await write(path, data);
+      await write(res.project.csv, res.csv);
+      await write(PROJECT_FILE, serializeProject(res.project));
+      await write(WIZARD_FILE, res.wizard);
+      oncreate(src, keep.size ? `Cambios aplicados. Se han conservado tus retoques en: ${[...keep].join(', ')}.` : 'Cambios del asistente aplicados al proyecto.');
+    });
+
+  function leave() {
+    if (changed && !confirm('Hay cambios del asistente sin aplicar. ¿Salir sin aplicarlos?')) return;
+    oncancel();
   }
 
   async function run(label: string, fn: () => Promise<void>) {
@@ -650,10 +733,19 @@
       {/each}
     </ol>
     <div class="nav-foot">
-      <button class="small" onclick={saveProgress} title="Descarga un archivo para seguir otro día o en otro ordenador">Guardar progreso</button>
-      <button class="ghost small" onclick={() => progressInput.click()}>Cargar progreso…</button>
-      <button class="ghost small" onclick={restart}>Empezar de cero</button>
-      <button class="ghost small" onclick={oncancel}>Salir</button>
+      {#if start}
+        <p class="hint">Proyecto «{start.source.label}»{changed ? ' · cambios sin aplicar' : ''}</p>
+        {#if writable}
+          <button class="small" onclick={saveInProject} disabled={!!busy} title="Guarda tus respuestas en la carpeta del proyecto sin cambiar las cartas">Guardar sin aplicar</button>
+        {/if}
+        <button class="ghost small" onclick={saveProgress} title="Descarga un archivo con tus respuestas">Descargar progreso</button>
+        <button class="ghost small" onclick={leave}>Salir</button>
+      {:else}
+        <button class="small" onclick={saveProgress} title="Descarga un archivo para seguir otro día o en otro ordenador">Guardar progreso</button>
+        <button class="ghost small" onclick={() => progressInput.click()}>Cargar progreso…</button>
+        <button class="ghost small" onclick={restart}>Empezar de cero</button>
+        <button class="ghost small" onclick={oncancel}>Salir</button>
+      {/if}
     </div>
   </nav>
 
@@ -1164,6 +1256,43 @@
         </tbody>
       </table>
       <p class="hint">Puedes cambiar la imagen de cualquier carta en la columna «Ilustración» de la tabla.</p>
+    {:else if start}
+      <h2>Aplicar los cambios</h2>
+      <ul class="summary">
+        <li><b>{answers.name}</b> · {answers.size.width} × {answers.size.height} mm + 3 mm de sangrado</li>
+        <li>{summary.types} {summary.types === 1 ? 'tipo' : 'tipos'} y {summary.cards} cartas: {labels.join(', ')}</li>
+        <li>{summary.written} de {summary.cards} cartas con datos propios · {summary.images} con ilustración propia</li>
+      </ul>
+      <p class="lead">
+        Se actualizan las plantillas, los atributos, los colores y la tabla del proyecto «{start.source.label}». Lo que el asistente no
+        conoce se queda como está: columnas propias del CSV, tipos y plantillas hechos a mano, fuentes y ajustes de exportación.
+      </p>
+      {#if conflicts.length}
+        <div class="field">
+          <span>Plantillas retocadas a mano</span>
+          <p class="hint">Estas plantillas se cambiaron en el editor después del asistente. ¿Qué hacemos con cada una?</p>
+          {#each conflicts as k}
+            <label class="check">
+              <input type="checkbox" checked={!regenerate.includes(k)} onchange={(e) => (regenerate = e.currentTarget.checked ? regenerate.filter((x) => x !== k) : [...regenerate, k])} />
+              Conservar mis retoques en «{k}» {regenerate.includes(k) ? '(se regenera con el asistente)' : ''}
+            </label>
+          {/each}
+        </div>
+      {/if}
+      {#if pendingImages()}
+        <p class="warn">{pendingImages()} cartas usan imágenes que no están en la carpeta: vuelve al paso «Imágenes».</p>
+      {/if}
+      <div class="create">
+        {#if writable}
+          <button class="primary big" disabled={!!busy} onclick={applyToProject}>Aplicar a «{start.source.label}»</button>
+        {:else}
+          <p class="hint">Este proyecto no se puede escribir (no está abierto desde una carpeta en Chrome o Edge). Crea uno nuevo con los cambios:</p>
+          {#if window.showDirectoryPicker}<button class="primary" disabled={!!busy} onclick={createInFolder}>Guardar en una carpeta…</button>{/if}
+          <button disabled={!!busy} onclick={createZip}>Descargar .zip</button>
+          <button class="ghost" disabled={!!busy} onclick={tryIt}>Probar sin guardar</button>
+        {/if}
+      </div>
+      {#if busy}<p class="hint">{busy}</p>{/if}
     {:else}
       <h2>Crear el proyecto</h2>
       <ul class="summary">

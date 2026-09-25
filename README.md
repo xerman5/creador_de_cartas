@@ -7,6 +7,7 @@ npm install
 npm run dev          # http://localhost:5173  (…/#ejemplo abre el ejemplo)
 npm run build        # versión estática en dist/
 npm test             # pruebas del núcleo (Vitest)
+npm run e2e          # pruebas en Chrome de principio a fin (Playwright; la primera vez: npx playwright install chromium)
 npm run check        # tipos
 ```
 
@@ -33,6 +34,15 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 9. **Cartas**: la tabla de cada tipo, una fila por carta, con la carta seleccionada dibujada al lado. Las habilidades son casillas (las cartas que aún no se han tocado llevan algunas de ejemplo). Se puede **descargar un CSV para rellenar** (una columna por atributo; las habilidades con `x`; «;» para Excel) e **importar un CSV** (ese mismo, el del proyecto o uno propio: reconoce `nombre`, `texto`, `imagen`, `clan`…; avisa de tipos y columnas que no encajan).
 10. **Imágenes**: elegir una carpeta (o soltarla, o soltar imágenes sueltas) y emparejarlas solas: (1) el archivo se llama como el id de la carta (`CRI-001.png`); (2) como su título (`guardian-de-ceniza.jpg`, sin importar mayúsculas, tildes ni espacios); (3) opcional: las demás por orden alfabético dentro de una subcarpeta con el nombre del tipo (`criatura/01.png`). Cada carta se puede corregir en la tabla. Las imágenes se copian a `assets/ilustraciones/`.
 11. **Crear**: en una carpeta (Chrome/Edge), como .zip o de prueba sin guardar.
+
+### Retomar el asistente
+
+El proyecto creado lleva un `asistente.json` con las respuestas. El botón **Asistente** de la barra vuelve al asistente con ese proyecto, en cualquier paso, para cambiar lo que quieras y **aplicarlo**:
+
+- Lo que se cambió fuera del asistente desde la última vez (la tabla en Excel, iconos o colores en el editor, el tamaño de carta) se trae al asistente, y te dice qué ha traído.
+- Las plantillas retocadas a mano en el editor no se pisan: al aplicar pregunta, y por defecto conserva tus retoques.
+- Lo que el asistente no conoce se queda como está: columnas propias del CSV (por `id`), tipos y plantillas hechos a mano, fuentes y ajustes de exportación.
+- **Guardar sin aplicar** deja tus respuestas en la carpeta para seguir otro día sin tocar las cartas.
 
 **Guardar progreso** descarga un `.asistente.json` con todas las respuestas, la tabla y los **iconos y fondos subidos**, para seguir otro día o en otro ordenador con **Cargar progreso…** (las ilustraciones no van en el archivo, porque pesan mucho: al volver, se elige de nuevo la carpeta). Además, el borrador se guarda solo en el navegador (los iconos y fondos, en IndexedDB).
 

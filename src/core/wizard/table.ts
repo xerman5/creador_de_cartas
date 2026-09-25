@@ -145,6 +145,13 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
       const v = (row[header] ?? '').trim();
       if (v && !isPlaceholder(v)) apply(data, v);
     }
+    // Lo que el asistente pone de relleno («Criatura 3», el nombre del tipo como línea de tipo) no es un dato.
+    const label = a.types[index].label.trim();
+    const numbered = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\d+$`);
+    for (const l of langs) {
+      if (numbered.test(data[textKey('titulo', l, langs)] ?? '')) delete data[textKey('titulo', l, langs)];
+      if (data[textKey('subtipo', l, langs)] === label) delete data[textKey('subtipo', l, langs)];
+    }
     incoming.set(index, [...(incoming.get(index) ?? []), data]);
   }
 

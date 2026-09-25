@@ -3,6 +3,7 @@ import { downloadBlob } from '../core/export';
 import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../core/project';
 import type { Project } from '../core/types';
 import { resourcePath, type ShelfId } from '../core/wizard/resources';
+import { WIZARD_FILE } from '../core/wizard/sync';
 
 const HISTORY_LIMIT = 200;
 /** Cambios seguidos sobre el mismo campo en este intervalo cuentan como un solo paso de deshacer. */
@@ -27,6 +28,8 @@ export class Workspace {
   error = $state('');
   canUndo = $state(false);
   canRedo = $state(false);
+  /** El proyecto se hizo con el asistente (tiene asistente.json): se puede retomar. */
+  hasWizard = $state(false);
 
   #undo: Project[] = [];
   #redo: Project[] = [];
@@ -37,11 +40,12 @@ export class Workspace {
     return this.lp?.project ?? null;
   }
 
-  async open(src: FileSource): Promise<boolean> {
+  /** Con `fresh`, se relee todo aunque sea la misma carpeta y se empieza un historial nuevo. */
+  async open(src: FileSource, fresh = false): Promise<boolean> {
     this.loading = true;
     this.error = '';
     try {
-      const same = src === this.source;
+      const same = src === this.source && !fresh;
       // Al recargar la misma carpeta con cambios sin guardar se conserva el proyecto editado.
       const next = await loadProject(src, same && this.dirty ? (this.lp?.project ?? undefined) : undefined);
       const old = this.lp;
@@ -55,6 +59,7 @@ export class Workspace {
       }
       if (!next.langs.includes(this.lang)) this.lang = next.langs.includes('es') ? 'es' : (next.langs[0] ?? '');
       this.assetFiles = (await src.list?.(next.project.assetsDir)) ?? [];
+      this.hasWizard = !!(await src.read(WIZARD_FILE));
       setTimeout(() => old?.assets.dispose(), 5000);
       return true;
     } catch (e) {

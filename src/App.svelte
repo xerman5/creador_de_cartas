@@ -6,6 +6,7 @@
   import ResourcesView from './lib/ResourcesView.svelte';
   import TemplateEditor from './lib/TemplateEditor.svelte';
   import Wizard from './lib/wizard/Wizard.svelte';
+  import { loadResume, type ResumeContext } from './lib/wizard/resume';
   import { Workspace } from './lib/workspace.svelte';
 
   type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'cartas';
@@ -23,15 +24,34 @@
   let editTipo = $state('');
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
+  /** Con él, el asistente trabaja sobre el proyecto abierto en vez de crear uno nuevo. */
+  let resume = $state.raw<ResumeContext | null>(null);
   let notice = $state('');
 
   function openWizard() {
-    if (confirmDiscard()) wizard = true;
+    if (!confirmDiscard()) return;
+    resume = null;
+    wizard = true;
+  }
+
+  async function resumeWizard() {
+    const lp = ws.lp;
+    if (!lp || !ws.source) return;
+    if (ws.dirty && !confirm('Hay cambios sin guardar. El asistente trabaja sobre lo guardado: ¿guardarlos antes de seguir?')) return;
+    if (ws.dirty) await ws.save();
+    try {
+      resume = await loadResume(ws.source, lp.project);
+      if (resume) wizard = true;
+      else ws.error = 'Este proyecto no se hizo con el asistente (no tiene asistente.json).';
+    } catch (e) {
+      ws.error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function fromWizard(src: FileSource, note = '') {
-    if (await ws.open(src)) {
+    if (await ws.open(src, true)) {
       wizard = false;
+      resume = null;
       tab = 'cartas';
       notice = note;
     }
@@ -180,6 +200,9 @@
       <span class="sep"></span>
     {/if}
 
+    {#if ws.lp && ws.hasWizard && !wizard}
+      <button class="ghost" onclick={resumeWizard} disabled={ws.loading} title="Volver al asistente con este proyecto para cambiar lo que quieras">Asistente</button>
+    {/if}
     <button class="ghost" onclick={openWizard} disabled={ws.loading || wizard} title="Crear un proyecto con el asistente">Nuevo…</button>
     <button class="ghost" onclick={openFolder} disabled={ws.loading}>Abrir…</button>
     <button class="ghost" onclick={openExample} disabled={ws.loading}>Ejemplo</button>
@@ -200,7 +223,9 @@
 
   <div class="body">
     {#if wizard}
-      <Wizard oncreate={fromWizard} oncancel={() => (wizard = false)} />
+      {#key resume}
+        <Wizard {resume} oncreate={fromWizard} oncancel={() => ((wizard = false), (resume = null))} />
+      {/key}
     {:else if !ws.lp}
       <div class="welcome">
         <h1>Creador de cartas</h1>
