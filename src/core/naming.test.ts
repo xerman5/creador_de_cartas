@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { compactKey, conventionalId, conventionalName, nearest, parseNumbered, singular, typeMatchKey } from './naming';
+import { compactKey, conventionalId, conventionalName, isGenericName, nearest, parseNumbered, singular, titleFromFile, typeMatchKey } from './naming';
 
 describe('convención de nombres: clase, tipo y número', () => {
   it('singular de los nombres de tipos', () => {
@@ -40,6 +40,17 @@ describe('convención de nombres: clase, tipo y número', () => {
     expect(conventionalName('carpeta/Elfos-Lugares7.PNG', ['Elfo', 'Lugar'], 7)).toBe('carpeta/elfo-lugar-007.png');
     expect(conventionalName('x.png', ['Elfo', 'Lugar'], 1, true)).toBe('elfo-lugar-001(ref).png');
     expect(compactKey('Carta de évento')).toBe('cartadeevento');
+  });
+
+  it('los nombres genéricos (cámaras, capturas) no son de ningún tipo ni dan título', () => {
+    for (const name of ['IMG_2041.jpg', 'DSC00012.JPG', 'Captura de pantalla 2024-03-01 a las 10.12.33.png', 'PXL_20240101_123456.jpg', '0003.png'])
+      expect(parseNumbered(name), name).toBeNull();
+    expect(isGenericName('IMG_2041.jpg')).toBe(true);
+    expect(isGenericName('dragon rojo.png')).toBe(false);
+    expect(titleFromFile('bocetos/guardian-de-ceniza.jpg')).toBe('Guardian de ceniza');
+    expect(titleFromFile('DragonRojo.png')).toBe('Dragon Rojo');
+    expect(titleFromFile('TORRE_OSCURA.webp')).toBe('Torre oscura');
+    expect(titleFromFile('IMG_2041.jpg')).toBe('');
   });
 
   it('sugiere el nombre que se quería decir', () => {

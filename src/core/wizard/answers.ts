@@ -256,6 +256,38 @@ export function textKey(field: string, lang: string, langs: string[]): string {
   return langs.length > 1 ? `${field}-${lang}` : field;
 }
 
+const TEXT_FIELDS = ['titulo', 'subtipo', 'descripcion', 'sabor'];
+
+/**
+ * Cartas con las claves de texto de otros idiomas: con un idioma, `titulo`; con varios, `titulo-es`…
+ * Lo escrito en un idioma que se quita se guarda aparte (`titulo-en`) y vuelve si se añade otra vez.
+ */
+export function relang(types: TypeAnswer[], from: string[], to: string[]): TypeAnswer[] {
+  const all = [...new Set([...from, ...to])];
+  return types.map((t) => {
+    if (!t.cards?.length) return t;
+    const cards = t.cards.map((c) => {
+      const out: CardData = { ...c };
+      const values = new Map<string, string>();
+      for (const f of TEXT_FIELDS)
+        for (const l of all) {
+          const v = from.includes(l) ? c[textKey(f, l, from)] : c[`${f}-${l}`];
+          if (v !== undefined) values.set(`${f}|${l}`, v);
+        }
+      for (const f of TEXT_FIELDS) {
+        delete out[f];
+        for (const l of all) delete out[`${f}-${l}`];
+      }
+      for (const [k, v] of values) {
+        const [f, l] = k.split('|');
+        out[to.includes(l) ? textKey(f, l, to) : `${f}-${l}`] = v;
+      }
+      return out;
+    });
+    return { ...t, cards };
+  });
+}
+
 /** Nombre completo de un tipo: «Elfo Ataque» (o «Lugar» sin clase). Es el valor de la columna «tipo» y el de su plantilla. */
 export const fullName = (t: Pick<TypeAnswer, 'label' | 'clase'>) => [t.clase?.trim(), t.label.trim()].filter(Boolean).join(' ');
 /** Para enseñar: «Elfo · Ataque». */

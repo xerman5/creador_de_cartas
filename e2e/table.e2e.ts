@@ -1,17 +1,17 @@
 import { expect, test } from '@playwright/test';
-import { fixture, mockFolder, nextUntil, readFolderFile, shot, startWizard, toggleElements, trackErrors } from './helpers';
+import { fixture, goStep, mockFolder, nextUntil, readFolderFile, shot, startWizard, toggleElements, trackErrors } from './helpers';
 
 test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y guardado del CSV', async ({ page, context }) => {
   const errors = trackErrors(page);
   await mockFolder(context, 'tabla');
   await startWizard(page, 'Bestias', [{ label: 'Criatura', count: 3 }]);
   await toggleElements(page, ['Atributos y habilidades']);
-  await nextUntil(page, 'Imágenes');
 
-  // Una ilustración propia para la primera carta (por su id) y su encuadre.
+  // De vuelta al material: una ilustración propia para la primera carta (por tipo y número) y su encuadre.
+  await goStep(page, 'Tu material');
   await page.locator('input[webkitdirectory]').last().setInputFiles(fixture('ilustraciones'));
   await expect(page.locator('.report').first()).toContainText('1 por tipo y número');
-  await page.locator('.steps button', { hasText: 'Cartas' }).click();
+  await nextUntil(page, 'Cartas');
   await page.locator('table.cards tbody tr').first().click();
   const zoom = page.getByLabel('Encuadre de la ilustración: ampliación');
   await zoom.fill('2');

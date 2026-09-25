@@ -21,6 +21,7 @@
     isAbility,
     typeLabel,
     PALETTES,
+    relang,
     resolvedType,
     textKey,
     typeKey,
@@ -49,9 +50,10 @@
   import TextControls from '../panels/TextControls.svelte';
   import { cardPixels } from '../../core/card';
   import { acceptsDrop, droppedEntries } from '../drop';
-  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, namingPlan, REFS_DIR, type CardRef, type MatchResult } from '../../core/wizard/images';
-  import { conventionalId, conventionalName, parseNumbered } from '../../core/naming';
-  import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
+  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, isRefFile, matchImages, namingPlan, REFS_DIR, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { capitalize, conventionalId, conventionalName, parseNumbered, singular, titleFromFile, typeMatchKey, wordsOf } from '../../core/naming';
+  import { fillCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
+  import { deduceFromCsv } from '../../core/wizard/material';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
   import CropEditor from '../CropEditor.svelte';
@@ -82,23 +84,28 @@
     resume?: ResumeContext | null;
   } = $props();
 
+  /**
+   * Primero lo que ya tienes (tu material), después la estructura que se deduce de él (tipos, contenido,
+   * cartas) y, con tus cartas de verdad a la vista, el diseño.
+   */
   const STEPS = [
-    { id: 'proyecto', title: 'Tu juego' },
-    { id: 'tipos', title: 'Tipos de carta' },
-    { id: 'contenido', title: 'Qué lleva cada carta' },
-    { id: 'atributos', title: 'Atributos y rareza' },
-    { id: 'diseno', title: 'Diseño' },
-    { id: 'ajustes', title: 'Ajustes' },
-    { id: 'recorrido', title: 'Tipo a tipo' },
-    { id: 'traseras', title: 'Traseras' },
-    { id: 'cartas', title: 'Cartas' },
-    { id: 'imagenes', title: 'Imágenes' },
-    { id: 'crear', title: 'Crear' },
+    { id: 'proyecto', title: 'Tu juego', phase: 'Empezar' },
+    { id: 'material', title: 'Tu material', phase: 'Empezar' },
+    { id: 'tipos', title: 'Tipos de carta', phase: 'Estructura' },
+    { id: 'contenido', title: 'Qué lleva cada carta', phase: 'Estructura' },
+    { id: 'atributos', title: 'Atributos y rareza', phase: 'Estructura' },
+    { id: 'cartas', title: 'Cartas', phase: 'Estructura' },
+    { id: 'diseno', title: 'Diseño', phase: 'Diseño' },
+    { id: 'ajustes', title: 'Ajustes', phase: 'Diseño' },
+    { id: 'recorrido', title: 'Tipo a tipo', phase: 'Diseño' },
+    { id: 'traseras', title: 'Traseras', phase: 'Diseño' },
+    { id: 'crear', title: 'Crear', phase: 'Terminar' },
   ] as const;
   type StepId = (typeof STEPS)[number]['id'];
-  // «fino» era el ajuste fino global, sustituido por el recorrido tipo a tipo.
+  /** Pasos que ya no existen: «fino» es ahora el recorrido tipo a tipo; «imagenes», tu material. */
+  const RENAMED: Record<string, StepId> = { fino: 'recorrido', imagenes: 'material' };
   const stepIndex = (s: string | number) =>
-    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === (s === 'fino' ? 'recorrido' : s)));
+    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === (RENAMED[s] ?? s)));
   const LANGS: [string, string][] = [
     ['es', 'Español'],
     ['en', 'Inglés'],
@@ -144,8 +151,8 @@
     setTimeout(() => old?.assets.dispose(), 4000);
   }
 
-  // Con la tabla o las imágenes a la vista, la vista previa enseña la carta seleccionada.
-  const focus = $derived(stepId === 'cartas' || stepId === 'imagenes' ? { type: current, card: row } : undefined);
+  // Con la tabla a la vista, la vista previa enseña la carta seleccionada.
+  const focus = $derived(stepId === 'cartas' ? { type: current, card: row } : undefined);
 
   $effect(() => {
     const snap = $state.snapshot(answers) as WizardAnswers;
@@ -188,8 +195,7 @@
 
   // ------------------------------------------------------------ validación
 
-  const problems = $derived.by((): string[] => {
-    const id = STEPS[step].id;
+  function problemsOf(id: StepId): string[] {
     const out: string[] = [];
     if (id === 'proyecto') {
       if (!answers.name.trim()) out.push('Ponle un nombre al juego.');
@@ -217,7 +223,21 @@
       if (uses('variant') && !answers.variant.values.some((v) => v.name.trim())) out.push('Define al menos un valor de rareza o facción.');
     }
     return out;
-  });
+  }
+  const problems = $derived(problemsOf(stepId));
+
+  /**
+   * Camino rápido: desde la estructura, saltar a «Crear» con el diseño por defecto. Solo si ningún paso
+   * que se salta tiene algo sin resolver; se puede volver a cualquiera después.
+   */
+  const skipProblems = $derived(STEPS.slice(step).flatMap((s) => problemsOf(s.id)));
+  const canFinish = $derived(step >= stepIndex('tipos') && step < STEPS.length - 1);
+  function finishNow() {
+    if (skipProblems.length) return;
+    step = STEPS.length - 1;
+    reached = step;
+    error = '';
+  }
 
   function go(to: number) {
     if (to > step && problems.length) return;
@@ -303,7 +323,11 @@
   const ATTR_COLORS = ['#d9534f', '#4caf50', '#3d8fe0', '#f0b429', '#a45bd6', '#26a69a', '#ef7d3c', '#8d6e63'];
 
   function toggleLang(code: string) {
-    answers.langs = answers.langs.includes(code) ? answers.langs.filter((l) => l !== code) : [...answers.langs, code];
+    const from = [...answers.langs];
+    const to = from.includes(code) ? from.filter((l) => l !== code) : [...from, code];
+    // Los textos ya escritos pasan a las columnas de los nuevos idiomas (titulo → titulo-es).
+    if (to.length) answers.types = relang($state.snapshot(answers.types) as TypeAnswer[], from, to);
+    answers.langs = to;
   }
 
   function restart() {
@@ -345,7 +369,7 @@
       current = 0;
       row = 0;
       const pending = pendingImages();
-      notice = `Progreso de «${p.answers.name}» cargado.` + (pending ? ` ${pending} cartas usan imágenes de una carpeta: vuelve a elegirla en el paso «Imágenes».` : '');
+      notice = `Progreso de «${p.answers.name}» cargado.` + (pending ? ` ${pending} cartas usan imágenes de una carpeta: vuelve a elegirla en «Tu material».` : '');
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -604,13 +628,20 @@
     row = Math.min(row, currentType.count - 1);
   }
 
-  async function importFile(file: File) {
+  /** Lo que la hoja de cálculo ha dicho del juego (tipos, idiomas, atributos…). */
+  let importNotes = $state<string[]>([]);
+
+  /** Importa una hoja de cálculo y deduce de ella lo que pueda; después vuelve a emparejar las imágenes. */
+  async function importFile(file: File, match = true) {
     try {
-      const { types, report } = importCsv($state.snapshot(answers) as WizardAnswers, await file.text(), current);
-      answers.types = types;
-      importReport = report;
+      const d = deduceFromCsv($state.snapshot(answers) as WizardAnswers, await file.text(), current);
+      answers = d.answers;
+      importReport = d.report;
+      importNotes = d.notes;
+      current = Math.min(current, answers.types.length - 1);
       row = 0;
-      if (!Object.keys(report.byType).length) error = 'No se ha importado ninguna carta: revisa que la columna «tipo» use los nombres de tus tipos.';
+      if (!Object.keys(d.report.byType).length) error = `No se ha importado ninguna carta de «${file.name}»: ¿tiene una fila por carta con cabeceras?`;
+      if (match && imageMap.size) runMatch();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -627,9 +658,9 @@
 
   /** Ruta dentro de la carpeta elegida → archivo. Solo en memoria: no se guarda en el borrador. */
   let imageMap = $state.raw<Map<string, Blob>>(start?.images ?? new Map());
-  let byOrder = $state(true);
   let match = $state.raw<MatchResult | null>(null);
   let folderInput: HTMLInputElement;
+  let filesInput: HTMLInputElement;
   const imagePaths = $derived([...imageMap.keys()].map((p) => `${IMAGES_DIR}/${p}`));
 
   function cardRefs(): CardRef[] {
@@ -643,35 +674,59 @@
     );
   }
 
-  /** Empareja ilustraciones y referencias («(ref)») con las cartas y rellena sus columnas. */
+  /**
+   * Empareja ilustraciones y referencias («(ref)») con las cartas que aún no tienen, sin repetir las que ya
+   * usa otra carta: lo elegido a mano no se pisa.
+   */
   function runMatch() {
     const refs = cardRefs();
-    const paths = [...imageMap.keys()];
-    const result = matchImages(refs, paths, answers.types, byOrder);
-    const refResult = matchImages(refs, paths, answers.types, false, true);
+    const free = (col: string, dir: string) => ({
+      cards: refs.filter((r) => !cell(answers.types[r.type], r.index, col)),
+      paths: [...imageMap.keys()].filter((p) => !usedImages.has(`${dir}/${p}`)),
+    });
+    const art = free('ilustracion', IMAGES_DIR);
+    const ref = free('referencia', REFS_DIR);
+    const result = matchImages(art.cards, art.paths, answers.types, false);
+    const refResult = matchImages(ref.cards, ref.paths, answers.types, false, true);
     answers.types.forEach((t, type) => {
       for (let index = 0; index < t.count; index++) {
         const path = result.assigned.get(cardRefKey(type, index));
         if (path) setCell(t, index, 'ilustracion', `${IMAGES_DIR}/${path}`);
-        const ref = refResult.assigned.get(cardRefKey(type, index));
-        if (ref) setCell(t, index, 'referencia', `${REFS_DIR}/${ref}`);
+        const r = refResult.assigned.get(cardRefKey(type, index));
+        if (r) setCell(t, index, 'referencia', `${REFS_DIR}/${r}`);
       }
     });
     match = result;
-    refCount = refResult.assigned.size;
   }
-  let refCount = $state(0);
+
+  /** Imágenes que usa alguna carta, con su carpeta: «ilustraciones/lugar001.png», «referencias/…». */
+  const usedImages = $derived(
+    new Set(answers.types.flatMap((t) => (t.cards ?? []).slice(0, t.count).flatMap((c) => [c.ilustracion ?? '', c.referencia ?? '']).filter(Boolean))),
+  );
+  const inCards = $derived([...imageMap.keys()].filter((p) => usedImages.has(`${IMAGES_DIR}/${p}`)).length);
+  const refCount = $derived([...imageMap.keys()].filter((p) => usedImages.has(`${REFS_DIR}/${p}`)).length);
+
+  /** Lo que se trae: imágenes (a la lista de la carpeta) y, si hay, la primera hoja de cálculo. */
+  async function ingest(list: { path: string; file: File }[], replace: boolean) {
+    const sheet = list.find((d) => /\.csv$/i.test(d.path));
+    if (sheet) await importFile(sheet.file, false);
+    const map = new Map(replace ? [] : imageMap);
+    for (const d of list) if (IMAGE_FILE.test(d.path)) map.set(d.path, d.file);
+    imageMap = map;
+    runMatch();
+  }
 
   function pickFolder(list: FileList | null) {
     if (!list?.length) return;
-    const map = new Map<string, File>();
-    for (const file of Array.from(list)) {
-      // Rutas relativas a la carpeta elegida: «criatura/01.png».
-      const path = (file.webkitRelativePath || file.name).split('/').slice(1).join('/') || file.name;
-      if (IMAGE_FILE.test(path)) map.set(path, file);
-    }
-    imageMap = map;
-    runMatch();
+    // Rutas relativas a la carpeta elegida: «criatura/01.png».
+    ingest(
+      Array.from(list).map((file) => ({ path: (file.webkitRelativePath || file.name).split('/').slice(1).join('/') || file.name, file })),
+      true,
+    );
+  }
+
+  function pickFiles(list: FileList | null) {
+    if (list?.length) ingest(Array.from(list).map((file) => ({ path: file.name, file })), false);
   }
 
   let dropOver = $state(false);
@@ -760,11 +815,132 @@
     // Si se suelta una sola carpeta, las rutas son relativas a ella, como al elegirla.
     const tops = new Set(list.map((d) => (d.path.includes('/') ? d.path.split('/')[0] : '')));
     const strip = tops.size === 1 && !tops.has('');
-    const map = new Map(imageMap);
-    for (const d of list) map.set(strip ? d.path.split('/').slice(1).join('/') : d.path, d.file);
-    imageMap = map;
-    runMatch();
+    ingest(
+      list.map((d) => ({ path: strip ? d.path.split('/').slice(1).join('/') : d.path, file: d.file })),
+      false,
+    );
   }
+
+  // ------------------------------------------------------------ imágenes a lo bruto
+
+  const natural = (a: string, b: string) => a.localeCompare(b, 'es', { numeric: true, sensitivity: 'base' });
+
+  /**
+   * Imágenes sin carta: ni emparejadas ni pendientes de la convención de nombres (un tipo por crear o
+   * cartas por añadir). Se agrupan aquí en cartas o se asignan después en la tabla.
+   */
+  const loose = $derived.by(() => {
+    const planned = new Set(plan.newTypes.flatMap((t) => t.files));
+    const growing = new Set(plan.grow.map((g) => typeMatchKey(answers.types[g.type]?.clase, answers.types[g.type]?.label)));
+    return [...imageMap.keys()]
+      .filter((p) => !usedImages.has(`${IMAGES_DIR}/${p}`) && !isRefFile(p) && !planned.has(p))
+      .filter((p) => !growing.has(parseNumbered(p)?.key ?? ''))
+      .sort(natural);
+  });
+  /** Por carpeta: una subcarpeta por tipo («lugares/…») es una forma sencilla de agruparlas. */
+  const looseGroups = $derived.by(() => {
+    const groups = new Map<string, string[]>();
+    for (const p of loose) {
+      const folder = p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+      groups.set(folder, [...(groups.get(folder) ?? []), p]);
+    }
+    return [...groups].map(([folder, files]) => ({ folder, files }));
+  });
+
+  // Miniaturas: una URL por imagen, que se reutiliza (la lista cambia con cada letra escrita en la tabla).
+  const thumbCache = new Map<string, { blob: Blob; url: string }>();
+  const looseUrls = $derived.by(() => {
+    const m = new Map<string, string>();
+    for (const p of loose.slice(0, 300)) {
+      const blob = imageMap.get(p);
+      if (!blob) continue;
+      let c = thumbCache.get(p);
+      if (c?.blob !== blob) {
+        if (c) URL.revokeObjectURL(c.url);
+        c = { blob, url: URL.createObjectURL(blob) };
+        thumbCache.set(p, c);
+      }
+      m.set(p, c.url);
+    }
+    return m;
+  });
+  $effect(() => () => thumbCache.forEach((c) => URL.revokeObjectURL(c.url)));
+
+  let chosen = $state<string[]>([]);
+  /** Tipo de las cartas nuevas: su índice o «new» (uno nuevo con `bruteName`). */
+  let bruteTarget = $state('new');
+  let bruteName = $state('');
+  let bruteClase = $state('');
+  let bruteTitles = $state(true);
+  let bruteReport = $state('');
+
+  function toggleChosen(p: string) {
+    chosen = chosen.includes(p) ? chosen.filter((x) => x !== p) : [...chosen, p];
+  }
+
+  /** Elige un grupo; si es una subcarpeta, propone su tipo (el que ya existe o uno nuevo con su nombre). */
+  function chooseGroup(g: { folder: string; files: string[] }) {
+    const all = g.files.every((f) => chosen.includes(f));
+    chosen = all ? chosen.filter((f) => !g.files.includes(f)) : [...new Set([...chosen, ...g.files])];
+    if (all || !g.folder) return;
+    const name = g.folder.split('/').pop()!;
+    const i = answers.types.findIndex((t) => t.label.trim() && typeMatchKey(t.clase, t.label) === typeMatchKey(name));
+    if (i >= 0) bruteTarget = String(i);
+    else {
+      bruteTarget = 'new';
+      bruteName = capitalize(wordsOf(name).map(singular).join(' ').toLowerCase());
+    }
+  }
+
+  /** Pone una imagen en una carta (y su título, si la carta no tiene y el nombre lo dice). */
+  function putImage(t: TypeAnswer, k: number, path: string, withTitle = true) {
+    setCell(t, k, 'ilustracion', `${IMAGES_DIR}/${path}`);
+    const key = textKey('titulo', answers.langs[0], answers.langs);
+    const title = withTitle ? titleFromFile(path) : '';
+    if (title && !cell(t, k, key)) setCell(t, k, key, title);
+  }
+
+  /** Una carta de cada imagen elegida: primero en las cartas sin imagen del tipo, después cartas nuevas. */
+  function makeCards() {
+    const files = loose.filter((p) => chosen.includes(p));
+    if (!files.length) return;
+    let type = Number(bruteTarget);
+    if (bruteTarget === 'new') {
+      const label = bruteName.trim();
+      const clase = bruteClase.trim() || undefined;
+      if (!label) return;
+      type = answers.types.findIndex((t) => typeMatchKey(t.clase, t.label) === typeMatchKey(clase, label));
+      if (type < 0) {
+        createType(label, Math.min(files.length, MAX_ROWS_PER_TYPE), clase);
+        type = answers.types.findIndex((t) => typeMatchKey(t.clase, t.label) === typeMatchKey(clase, label));
+      }
+    }
+    const t = answers.types[type];
+    if (!t) return;
+    let k = 0;
+    let made = 0;
+    for (const f of files) {
+      while (k < t.count && cell(t, k, 'ilustracion')) k++;
+      if (k >= MAX_ROWS_PER_TYPE) break;
+      if (k >= t.count) t.count = k + 1;
+      putImage(t, k, f, bruteTitles);
+      k++;
+      made++;
+    }
+    bruteReport = `${made} ${made === 1 ? 'carta' : 'cartas'} de «${typeLabel(t)}» con su imagen.`;
+    chosen = [];
+    bruteName = '';
+    bruteClase = '';
+    bruteTarget = 'new';
+  }
+
+  /** Bandeja de la tabla: una imagen sin carta, a la carta `k` del tipo que se ve. */
+  function assignLoose(path: string, k: number) {
+    if (!currentType) return;
+    putImage(currentType, k, path);
+    row = k;
+  }
+  const DRAG_TYPE = 'text/x-carta-imagen';
 
   /** Cartas que apuntan a imágenes de la carpeta que no están cargadas (p. ej. tras recargar la página). */
   function pendingImages(): number {
@@ -995,6 +1171,65 @@
   {/if}
 {/snippet}
 
+{#snippet importPanel()}
+  {#if importReport}
+    <div class="report">
+      {#if importNotes.length}De la hoja de cálculo: {importNotes.join(' · ')}.<br />{/if}
+      Importadas: {Object.entries(importReport.byType).map(([t, n]) => `${n} de «${t}»`).join(', ') || 'ninguna'}.
+      {#if importReport.unknownTypes.length}<br />Filas sin tipo que se pueda usar (ignoradas): {importReport.unknownTypes.join(', ')}.{/if}
+      {#if importReport.ignored.length}<br />Columnas ignoradas: {importReport.ignored.join(', ')}.{/if}
+      <button class="ghost small" onclick={() => (importReport = null)}>✕</button>
+    </div>
+  {/if}
+{/snippet}
+
+{#snippet loosePanel()}
+  {#if loose.length}
+    <div class="field loose">
+      <span>{loose.length} {loose.length === 1 ? 'imagen' : 'imágenes'} sin carta</span>
+      <p class="hint">
+        Sin un nombre de carta, y está bien así. Elige varias y haz una carta de cada una, o déjalas: en el paso «Cartas» las pones en cada
+        carta.
+      </p>
+      {#each looseGroups as g (g.folder)}
+        <div class="group">
+          <div class="row">
+            <b>{g.folder || 'Sueltas'}</b>
+            <small class="hint">{g.files.length}</small>
+            <button class="ghost small" onclick={() => chooseGroup(g)}>
+              {g.files.every((f) => chosen.includes(f)) ? 'Quitar' : 'Elegir'} {g.files.length === 1 ? 'la' : `las ${g.files.length}`}
+            </button>
+          </div>
+          <div class="thumbs">
+            {#each g.files.slice(0, 300) as f (f)}
+              <button class="thumb" class:sel={chosen.includes(f)} aria-pressed={chosen.includes(f)} title={f} onclick={() => toggleChosen(f)}>
+                {#if looseUrls.get(f)}<img src={looseUrls.get(f)} alt={f} />{/if}
+                <small>{f.split('/').pop()}</small>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/each}
+      <div class="row make">
+        <span>{chosen.length} {chosen.length === 1 ? 'elegida' : 'elegidas'}: una carta de cada una en</span>
+        <select bind:value={bruteTarget} aria-label="Tipo de las cartas nuevas">
+          <option value="new">un tipo nuevo</option>
+          {#each answers.types as t, i}{#if t.label.trim()}<option value={String(i)}>«{typeLabel(t)}»</option>{/if}{/each}
+        </select>
+        {#if bruteTarget === 'new'}
+          <input type="text" class="clase" list="wz-clases" bind:value={bruteClase} placeholder="Clase (opcional)" aria-label="Clase del tipo nuevo" />
+          <input type="text" bind:value={bruteName} placeholder="Nombre del tipo" aria-label="Nombre del tipo nuevo" />
+        {/if}
+        <label class="check"><input type="checkbox" bind:checked={bruteTitles} /> El nombre del archivo es el título</label>
+        <button class="primary small" disabled={!chosen.length || (bruteTarget === 'new' && !bruteName.trim())} onclick={makeCards}>
+          Hacer {chosen.length} {chosen.length === 1 ? 'carta' : 'cartas'}
+        </button>
+      </div>
+    </div>
+  {/if}
+  {#if bruteReport}<div class="report">{bruteReport} <button class="ghost small" onclick={() => (bruteReport = '')}>✕</button></div>{/if}
+{/snippet}
+
 {#snippet reviewPanel()}
   <div class="field review">
     <span>Repaso</span>
@@ -1050,13 +1285,16 @@
 <input type="file" hidden accept=".json,application/json" bind:this={progressInput} onchange={(e) => { const f = e.currentTarget.files?.[0]; if (f) loadProgress(f); e.currentTarget.value = ''; }} />
 <input type="file" hidden accept=".csv,.txt,text/csv" bind:this={csvInput} onchange={(e) => { const f = e.currentTarget.files?.[0]; if (f) importFile(f); e.currentTarget.value = ''; }} />
 <input type="file" hidden multiple bind:this={folderInput} {...{ webkitdirectory: true }} onchange={(e) => { pickFolder(e.currentTarget.files); e.currentTarget.value = ''; }} />
+<input type="file" hidden multiple accept="image/*,.csv" bind:this={filesInput} onchange={(e) => { pickFiles(e.currentTarget.files); e.currentTarget.value = ''; }} />
 <datalist id="wz-images">{#each imagePaths as p}<option value={p}></option>{/each}</datalist>
+<datalist id="wz-clases">{#each clases as c}<option value={c}></option>{/each}</datalist>
 
 <div class="wizard">
   <nav class="steps">
     <h3>Asistente</h3>
     <ol>
       {#each STEPS as s, i}
+        {#if i === 0 || STEPS[i - 1].phase !== s.phase}<li class="phase">{s.phase}</li>{/if}
         <li>
           <button class:active={i === step} class:done={i < reached && i !== step} disabled={i > reached} onclick={() => go(i)}>
             <span class="n">{i < reached && i !== step ? '✓' : i + 1}</span>
@@ -1118,6 +1356,81 @@
         </div>
         <p class="hint">Con varios idiomas, el CSV tendrá una columna por idioma (título-es, título-en…) y podrás exportar cada uno.</p>
       </div>
+    {:else if stepId === 'material'}
+      <h2>Tu material</h2>
+      <p class="lead">
+        ¿Qué tienes ya? Tráelo y el asistente deducirá todo lo que pueda: tipos, cartas, textos, atributos. Lo que falte se rellena con
+        ejemplos, y siempre puedes volver aquí.
+      </p>
+      <div class="ways">
+        <div class="way">
+          <b>Imágenes con nombre</b>
+          <code>elfos-ataque-001.png</code>
+          <small>El nombre dice la clase, el tipo y el número: los tipos y las cartas se crean solos. Con <code>(ref)</code> al final es una
+            <b>referencia</b>, un boceto que verás al lado de la carta.</small>
+        </div>
+        <div class="way">
+          <b>Imágenes a lo bruto</b>
+          <code>IMG_2041.jpg</code>
+          <small>También vale: cada imagen es una carta. Las agrupas por tipo aquí o las pones en cada carta en la tabla. Una subcarpeta por tipo
+            (<code>lugares/</code>) ayuda.</small>
+        </div>
+        <div class="way">
+          <b>Una hoja de cálculo</b>
+          <code>cartas.csv</code>
+          <small>Una fila por carta: de sus columnas salen los tipos, los textos, los atributos, la rareza y los idiomas.</small>
+        </div>
+      </div>
+      <div
+        class="dropzone material-drop"
+        class:over={dropOver}
+        role="region"
+        aria-label="Soltar tu material"
+        ondragover={(e) => {
+          if (acceptsDrop(e)) {
+            e.preventDefault();
+            dropOver = true;
+          }
+        }}
+        ondragleave={() => (dropOver = false)}
+        ondrop={dropImages}
+      >
+        <p>Suelta aquí una carpeta, imágenes o un CSV</p>
+        <div class="row">
+          <button class="primary" onclick={() => folderInput.click()}>Elegir carpeta…</button>
+          <button onclick={() => filesInput.click()}>Elegir imágenes…</button>
+          <button onclick={() => csvInput.click()}>Importar hoja de cálculo…</button>
+        </div>
+      </div>
+      <p class="hint">
+        ¿Aún no tienes nada? Pulsa «Siguiente»: defines los tipos a mano y verás imágenes y textos de ejemplo. Nada se sube a ningún
+        sitio: las imágenes se copian a la carpeta del proyecto al crearlo. Desde Excel, guarda la hoja como CSV.
+      </p>
+      {#if imageMap.size}
+        <div class="report">
+          {imageMap.size} {imageMap.size === 1 ? 'imagen' : 'imágenes'}: {inCards} en cartas{refCount ? ` · ${refCount} ${refCount === 1 ? 'referencia' : 'referencias'}` : ''}{loose.length ? ` · ${loose.length} sin carta` : ''}.
+          {#if match && match.assigned.size}<br />Emparejadas ahora: {match.byRule.id} por id, {match.byRule.name} por tipo y número, {match.byRule.title} por título.{/if}
+        </div>
+      {/if}
+      {@render importPanel()}
+      {@render namingPanel()}
+      {@render loosePanel()}
+      {#if pendingImages()}
+        <p class="warn">{pendingImages()} cartas usan imágenes de una carpeta que ya no está cargada: vuelve a elegirla.</p>
+      {/if}
+      <details class="rules-help">
+        <summary>¿Cómo se emparejan las imágenes con las cartas?</summary>
+        <ol class="rules">
+          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'criatura-001'}.png</code></li>
+          <li>
+            El nombre es la <b>clase, el tipo y el número</b>: <code>{conventionalId([answers.types[0]?.clase, previewLabel(answers.types[0]?.label)], 3)}.png</code>
+            es la tercera carta de «{typeLabel(previewType(answers.types[0]))}» (da igual mayúsculas, plurales, separadores o ceros:
+            <code>Elfos_Ataques_3.jpg</code>).
+          </li>
+          <li>El nombre del archivo es el <b>título</b>: <code>guardian-de-ceniza.jpg</code> (por ejemplo, el de una hoja de cálculo).</li>
+          <li>Las demás quedan <b>sin carta</b>: haz una carta de cada una o ponlas a mano en la tabla.</li>
+        </ol>
+      </details>
     {:else if STEPS[step].id === 'tipos'}
       <h2>Tipos de carta</h2>
       <p class="lead">
@@ -1128,7 +1441,6 @@
         Si tu juego tiene <b>clases</b> (elfos, orcos, un clan…), escribe también la clase de cada tipo: «Elfo» + «Ataque» es un tipo con
         su propia maqueta, y sus cartas se numeran aparte (<code>elfo-ataque-001</code>). Sin clases, deja esa columna vacía.
       </p>
-      <datalist id="wz-clases">{#each clases as c}<option value={c}></option>{/each}</datalist>
       <table class="types">
         <thead><tr><th>Clase <small>(opcional)</small></th><th>Tipo o subclase</th><th>Cartas</th><th></th></tr></thead>
         <tbody>
@@ -1153,25 +1465,12 @@
         {/if}
       </div>
       <p class="hint">La cantidad es aproximada: el asistente crea esas filas en la tabla para que solo tengas que rellenarlas.</p>
-      <div
-        class="row dropzone"
-        class:over={dropOver}
-        role="region"
-        aria-label="Crear los tipos desde las imágenes"
-        ondragover={(e) => {
-          if (acceptsDrop(e)) {
-            e.preventDefault();
-            dropOver = true;
-          }
-        }}
-        ondragleave={() => (dropOver = false)}
-        ondrop={dropImages}
-      >
-        <span class="hint">
-          ¿Tienes ya las ilustraciones con nombres como <code>lugar001.png</code>, <code>evento001.png</code>? Suelta aquí la carpeta (o
-          <button class="link" onclick={() => folderInput.click()}>elígela</button>) y los tipos y sus cartas salen de los nombres.
-        </span>
-      </div>
+      {#if !imageMap.size && !importReport}
+        <p class="hint">
+          ¿Tienes ya imágenes o una hoja de cálculo? En <button class="link" onclick={() => go(stepIndex('material'))}>«Tu material»</button>
+          los tipos y sus cartas salen solos.
+        </p>
+      {/if}
       {@render namingPanel()}
     {:else if STEPS[step].id === 'contenido'}
       <h2>Qué lleva cada carta</h2>
@@ -1623,12 +1922,24 @@
         <button class="small" onclick={downloadCsv} title="Una fila por carta y una columna por campo, para rellenarla con calma">Descargar CSV para rellenar</button>
         <button class="small" onclick={() => csvInput.click()}>Importar CSV…</button>
       </div>
-      {#if importReport}
-        <div class="report">
-          Importadas: {Object.entries(importReport.byType).map(([t, n]) => `${n} de «${t}»`).join(', ') || 'ninguna'}.
-          {#if importReport.unknownTypes.length}<br />Tipos que no existen en el asistente (filas ignoradas): {importReport.unknownTypes.join(', ')}.{/if}
-          {#if importReport.ignored.length}<br />Columnas ignoradas: {importReport.ignored.join(', ')}.{/if}
-          <button class="ghost small" onclick={() => (importReport = null)}>✕</button>
+      {@render importPanel()}
+      {#if loose.length}
+        <div class="tray" role="region" aria-label="Imágenes sin carta">
+          <div class="row">
+            <span class="hint">
+              <b>{loose.length} sin carta.</b> Pulsa una para ponerla en la carta seleccionada ({row + 1}) o arrástrala a una fila.
+            </span>
+            <span class="grow"></span>
+            <button class="small" onclick={runMatch} title="Empareja otra vez por id, por tipo y número y por título (lo que ya tiene imagen no cambia)">Emparejar otra vez</button>
+          </div>
+          <div class="thumbs">
+            {#each loose.slice(0, 300) as f (f)}
+              <button class="thumb" draggable="true" title={f} ondragstart={(e) => e.dataTransfer?.setData(DRAG_TYPE, f)} onclick={() => assignLoose(f, row)}>
+                {#if looseUrls.get(f)}<img src={looseUrls.get(f)} alt={f} />{/if}
+                <small>{f.split('/').pop()}</small>
+              </button>
+            {/each}
+          </div>
         </div>
       {/if}
       {#if currentType}
@@ -1643,7 +1954,19 @@
             </thead>
             <tbody>
               {#each Array.from({ length: currentType.count }, (_, k) => k) as k (k)}
-                <tr class:selected={k === row} onfocusin={() => (row = k)} onclick={() => (row = k)}>
+                <tr
+                  class:selected={k === row}
+                  onfocusin={() => (row = k)}
+                  onclick={() => (row = k)}
+                  ondragover={(e) => e.dataTransfer?.types.includes(DRAG_TYPE) && e.preventDefault()}
+                  ondrop={(e) => {
+                    const f = e.dataTransfer?.getData(DRAG_TYPE);
+                    if (f) {
+                      e.preventDefault();
+                      assignLoose(f, k);
+                    }
+                  }}
+                >
                   <td class="n">{k + 1}</td>
                   {#each columns as c (c.key)}
                     <td class={c.kind}>
@@ -1684,70 +2007,6 @@
           rellenan con valores de ejemplo; las habilidades, solo si marcas la casilla (las cartas que aún no has tocado llevan algunas de ejemplo). ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
         </p>
       {/if}
-    {:else if stepId === 'imagenes'}
-      <h2>Imágenes</h2>
-      <p class="lead">¿Tienes ya las ilustraciones? Si no, se usan las provisionales y podrás cambiarlas cuando quieras.</p>
-      <div class="field">
-        <span>Elige la carpeta con tus imágenes</span>
-        <p class="hint">Se emparejan solas con las cartas, en este orden:</p>
-        <ol class="rules">
-          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'criatura001'}.png</code></li>
-          <li>
-            El nombre es la <b>clase, el tipo y el número</b>: <code>{conventionalId([answers.types[0]?.clase, previewLabel(answers.types[0]?.label)], 3)}.png</code>
-            es la tercera carta de «{typeLabel(previewType(answers.types[0]))}» (da igual mayúsculas, plurales, separadores o ceros:
-            <code>Elfos_Ataques_3.jpg</code>). Con <code>(ref)</code> al final (<code>elfos-ataque-003(ref).png</code>) es una
-            <b>referencia</b>: un boceto que verás al lado de la carta mientras la diseñas.
-          </li>
-          <li>El nombre del archivo es el <b>título</b>: <code>guardian-de-ceniza.jpg</code> (sin importar mayúsculas, tildes ni espacios).</li>
-          <li>
-            <label class="check">
-              <input type="checkbox" bind:checked={byOrder} onchange={() => imageMap.size && runMatch()} />
-              Las demás, por <b>orden alfabético</b> dentro de una subcarpeta con el nombre del tipo: <code>{fileKeyOf(answers.types[0]?.label)}/01.png</code>
-            </label>
-          </li>
-        </ol>
-        <div
-          class="row dropzone"
-          class:over={dropOver}
-          role="region"
-          aria-label="Soltar imágenes"
-          ondragover={(e) => {
-            if (acceptsDrop(e)) {
-              e.preventDefault();
-              dropOver = true;
-            }
-          }}
-          ondragleave={() => (dropOver = false)}
-          ondrop={dropImages}
-        >
-          <button class="primary" onclick={() => folderInput.click()}>Elegir carpeta de imágenes…</button>
-          <span class="hint">o suéltala aquí (también imágenes sueltas)</span>
-          {#if imageMap.size}<button class="small" onclick={runMatch}>Volver a emparejar</button>{/if}
-        </div>
-        <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
-      </div>
-      {@render namingPanel()}
-      {#if match}
-        <div class="report">
-          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.name} por tipo y número, {match.byRule.title} por título, {match.byRule.order} por orden{refCount ? ` · ${refCount} ${refCount === 1 ? 'referencia' : 'referencias'}` : ''}.
-          {#if match.unused.length}<br />Sin usar ({match.unused.length}): {match.unused.slice(0, 8).join(', ')}{match.unused.length > 8 ? '…' : ''}{/if}
-        </div>
-      {/if}
-      {#if pendingImages()}
-        <p class="warn">{pendingImages()} cartas usan imágenes de una carpeta que ya no está cargada: vuelve a elegirla.</p>
-      {/if}
-      <table class="fine">
-        <tbody>
-          {#each imageStats as st, i}
-            <tr>
-              <th>{st.label}</th>
-              <td>{st.own} de {st.total} con imagen propia</td>
-              <td><button class="ghost small" onclick={() => { current = i; go(stepIndex('cartas')); }}>Revisar en la tabla</button></td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-      <p class="hint">Puedes cambiar la imagen de cualquier carta en la columna «Ilustración» de la tabla.</p>
     {:else if start}
       <h2>Aplicar los cambios</h2>
       <ul class="summary">
@@ -1772,7 +2031,7 @@
         </div>
       {/if}
       {#if pendingImages()}
-        <p class="warn">{pendingImages()} cartas usan imágenes que no están en la carpeta: vuelve al paso «Imágenes».</p>
+        <p class="warn">{pendingImages()} cartas usan imágenes que no están en la carpeta: vuelve a «Tu material».</p>
       {/if}
       {@render reviewPanel()}
       <div class="create">
@@ -1796,7 +2055,7 @@
         <li>{summary.written} de {summary.cards} cartas con datos propios · {summary.images} con ilustración propia</li>
       </ul>
       {#if pendingImages()}
-        <p class="warn">{pendingImages()} cartas usan imágenes que no están cargadas: vuelve al paso «Imágenes» y elige la carpeta.</p>
+        <p class="warn">{pendingImages()} cartas usan imágenes que no están cargadas: vuelve a «Tu material» y elige la carpeta.</p>
       {/if}
       {@render reviewPanel()}
       <p class="lead">
@@ -1824,6 +2083,16 @@
 
     <footer class="nav">
       <button onclick={() => go(step - 1)} disabled={step === 0}>← Atrás</button>
+      {#if canFinish}
+        <button
+          class="ghost"
+          onclick={finishNow}
+          disabled={skipProblems.length > 0}
+          title={skipProblems.length ? skipProblems.join(' ') : 'Lo que no hayas ajustado queda con el diseño por defecto; puedes volver a cualquier paso'}
+        >
+          Terminar ya ⇥
+        </button>
+      {/if}
       {#if step < STEPS.length - 1}
         <button class="primary" onclick={() => go(step + 1)} disabled={problems.length > 0}>Siguiente →</button>
       {/if}
@@ -2280,6 +2549,119 @@
     border-color: var(--accent);
     background: rgba(76, 125, 255, 0.08);
   }
+  .steps li.phase {
+    margin: 10px 8px 2px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+  .steps li.phase:first-child {
+    margin-top: 0;
+  }
+  .ways {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .way {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .way code {
+    align-self: flex-start;
+  }
+  .way small {
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .material-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 18px 12px;
+  }
+  .material-drop p {
+    margin: 0;
+    color: var(--muted);
+  }
+  .rules-help {
+    margin-top: 12px;
+    font-size: 13px;
+  }
+  .rules-help summary {
+    cursor: pointer;
+    color: var(--muted);
+  }
+  .loose .group {
+    margin: 8px 0;
+  }
+  .thumbs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 260px;
+    overflow: auto;
+    padding: 2px;
+  }
+  .thumb {
+    all: unset;
+    box-sizing: border-box;
+    width: 76px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 3px;
+    border: 2px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    background: color-mix(in srgb, var(--border) 35%, transparent);
+  }
+  .thumb:hover {
+    border-color: var(--border);
+  }
+  .thumb.sel {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+  }
+  .thumb img {
+    width: 66px;
+    height: 66px;
+    object-fit: cover;
+    border-radius: 4px;
+  }
+  .thumb small {
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+  }
+  .make {
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  .make input[type='text'] {
+    width: 140px;
+  }
+  .tray {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    margin-bottom: 10px;
+  }
+  .tray .thumbs {
+    max-height: 120px;
+  }
   .seg {
     display: flex;
   }
@@ -2472,18 +2854,6 @@
   }
   table.cards .image {
     min-width: 190px;
-  }
-  table.fine {
-    border-collapse: collapse;
-  }
-  table.fine th {
-    text-align: left;
-    font-weight: normal;
-    padding: 6px 14px 6px 0;
-    white-space: nowrap;
-  }
-  table.fine td {
-    padding: 6px 10px 6px 0;
   }
   .rules {
     margin: 0;

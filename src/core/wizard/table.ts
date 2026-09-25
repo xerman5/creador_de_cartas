@@ -90,11 +90,29 @@ export interface ImportReport {
   ignored: string[];
 }
 
-const ALIASES: Record<string, string> = { nombre: 'titulo', texto: 'descripcion', reglas: 'descripcion', ambientacion: 'sabor', imagen: 'ilustracion' };
-const SILENT = new Set(['numero', 'trasera', 'color', 'tipo', 'id', 'clase', 'subclase']);
-const VARIANT_NAMES = ['rareza', 'faccion', 'clan', 'elemento'];
+export const ALIASES: Record<string, string> = { nombre: 'titulo', texto: 'descripcion', reglas: 'descripcion', ambientacion: 'sabor', imagen: 'ilustracion' };
+export const SILENT = new Set(['numero', 'trasera', 'color', 'tipo', 'id', 'clase', 'subclase']);
+export const VARIANT_NAMES = ['rareza', 'faccion', 'clan', 'elemento'];
 /** Textos de relleno del asistente (las reglas de ejemplo pueden llevar un icono detrás). */
 const isPlaceholder = (v: string) => Object.values(PLACEHOLDERS).some((p) => v === p.flavor || v.startsWith(p.rules));
+
+/**
+ * El tipo de una fila del CSV por su columna «tipo» (o «clase» + «subclase»): sin importar mayúsculas,
+ * plurales ni separadores («Elfos-Ataques» es Elfo · Ataque).
+ */
+export function typeFinder(types: TypeAnswer[]): (row: Record<string, string>) => number | undefined {
+  const byKey = new Map(types.map((t, i) => [typeKey(t), i]));
+  const byMatch = new Map(types.map((t, i) => [typeMatchKey(t.clase, t.label), i]));
+  return (row) => {
+    const tipo = (row.tipo ?? '').trim();
+    const withClase = row.clase?.trim() ? `${row.clase.trim()} ${row.subclase?.trim() || tipo}` : '';
+    for (const name of [withClase, tipo].filter(Boolean)) {
+      const i = byKey.get(normalizeKey(name)) ?? byMatch.get(typeMatchKey(name));
+      if (i !== undefined) return i;
+    }
+    return undefined;
+  };
+}
 
 /**
  * Lee un CSV (el de rellenar, el del proyecto o uno propio) y reparte sus filas por tipo.
@@ -140,18 +158,7 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
     else if (!SILENT.has(header)) report.ignored.push(header);
   }
 
-  const byKey = new Map(a.types.map((t, i) => [typeKey(t), i]));
-  // Sin coincidencia exacta, se admite el tipo escrito en plural o con otros separadores («Elfos-Ataques»).
-  const byMatch = new Map(a.types.map((t, i) => [typeMatchKey(t.clase, t.label), i]));
-  const find = (row: Record<string, string>): number | undefined => {
-    const tipo = (row.tipo ?? '').trim();
-    const withClase = row.clase?.trim() ? `${row.clase.trim()} ${row.subclase?.trim() || tipo}` : '';
-    for (const name of [tipo, withClase].filter(Boolean)) {
-      const i = byKey.get(normalizeKey(name)) ?? byMatch.get(typeMatchKey(name));
-      if (i !== undefined) return i;
-    }
-    return undefined;
-  };
+  const find = typeFinder(a.types);
   const incoming = new Map<number, CardData[]>();
   const unknown = new Set<string>();
   for (const row of csv.rows) {

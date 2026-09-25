@@ -349,7 +349,7 @@
           </div>
         {/if}
         {@render pieceRow('marco ilustracion', 'Marco de la ilustración', false)}
-        <p class="hint">Las ilustraciones de cada carta se eligen más adelante, en «Imágenes».</p>
+        <p class="hint">Las ilustraciones de cada carta vienen de «Tu material» o se ponen en la tabla de «Cartas».</p>
       {:else if E.id === 'titulo'}
         {@render textRows('titulo', 'Título')}
         {@render pieceRow('cabecera', 'Banda del título')}

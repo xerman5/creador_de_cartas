@@ -54,6 +54,19 @@ export const typeMatchKey = (...parts: (string | undefined)[]) =>
       .join(''),
   );
 
+/**
+ * Nombres que ponen las cámaras, los móviles o los generadores de imágenes («IMG_2041.jpg», «Captura 3.png»):
+ * no dicen nada de la carta.
+ */
+const GENERIC =
+  /^(img|image|imagen|dsc|dscn|dscf|pxl|photo|foto|picture|pic|screenshot|captura|scan|escaneo|untitled|sin|whatsapp|midjourney|dalle|dall|output|file|archivo|copia|copy|download|descarga)$/i;
+
+/** ¿Es un nombre genérico, sin nada de la carta? */
+export const isGenericName = (name: string) => {
+  const words = wordsOf(REF.test(stemOf(name)) ? stemOf(name).replace(REF, '') : stemOf(name));
+  return !words.length || GENERIC.test(normalizeKey(words[0])) || !words.some((w) => /[a-zñ]{2,}/i.test(normalizeKey(w)));
+};
+
 export function parseNumbered(name: string): Numbered | null {
   let stem = stemOf(name).trim();
   const ref = REF.test(stem) && !/^ref(erencia)?$/i.test(stem);
@@ -62,12 +75,23 @@ export function parseNumbered(name: string): Numbered | null {
   if (!m) return null;
   const n = parseInt(m[2], 10);
   const words = wordsOf(m[1]).map(singular);
-  if (!words.length || !(n >= 1) || /^\d/.test(words[0])) return null;
+  if (!words.length || !(n >= 1) || words.some((w) => /^\d+$/.test(w)) || /^\d/.test(words[0]) || GENERIC.test(normalizeKey(words[0]))) return null;
   return { words, key: compactKey(words.join('')), n, ref };
 }
 
 /** «Elfo», «ataque» → «Elfo», «Ataque»: la primera letra en mayúscula. */
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Título a partir del nombre de una imagen: «guardian-de-ceniza.jpg» → «Guardian de ceniza». Vacío si el nombre es genérico. */
+export function titleFromFile(path: string): string {
+  if (isGenericName(path)) return '';
+  const stem = stemOf(path).trim().replace(REF, '');
+  const words = wordsOf(stem);
+  const text = words.join(' ');
+  // Todo en mayúsculas o todo en minúsculas se deja como una frase; si no, como se escribió.
+  const plain = text === text.toLowerCase() || text === text.toUpperCase() ? text.toLowerCase() : text;
+  return capitalize(plain.replace(/\s+/g, ' ').trim());
+}
 
 /** Id con la convención: «lugar-001», «elfo-ataque-001», «carta-de-evento-012». */
 export function conventionalId(parts: string | (string | undefined)[], n: number, width = 3): string {
