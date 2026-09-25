@@ -5,6 +5,7 @@
   import type { RenderOptions } from '../core/render';
   import { normalizeKey } from '../core/text';
   import CardView from './CardView.svelte';
+  import RefImage from './RefImage.svelte';
   import { BLEED_MM, cardSizeFor } from '../core/card';
   import { zoneAt } from '../core/pick';
   import { templateFor } from '../core/render';
@@ -108,6 +109,7 @@
           {/if}
           <figcaption>Anverso · pulsa un elemento para ajustarlo</figcaption>
         </figure>
+        <RefImage {lp} {row} width={260} />
         {#if backIndex >= 0}
           <figure>
             <button class="plain" onclick={() => onselect(backIndex)} title="Ir a la trasera">

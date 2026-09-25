@@ -31,10 +31,10 @@ test('fuentes propias, trasera a medida y repaso final antes de crear', async ({
   await page.locator('table.cards tbody tr').nth(1).locator('td').nth(heads.indexOf('Reglas')).locator('textarea').fill('Muy largo. '.repeat(120));
   await nextUntil(page, 'Crear');
   await expect(page.locator('.review')).toContainText('4 cartas revisadas');
-  await expect(page.locator('.review .issues').first()).toContainText('criatura002');
+  await expect(page.locator('.review .issues').first()).toContainText('criatura-002');
   await expect(page.locator('.review .issues').first()).toContainText('no cabe');
   await shot(page, 'repaso');
-  await page.locator('.review .issues button', { hasText: 'criatura002' }).click();
+  await page.locator('.review .issues button', { hasText: 'criatura-002' }).click();
   await expect(page.locator('table.cards tbody tr.selected td.n')).toHaveText('2');
 
   await nextUntil(page, 'Crear');

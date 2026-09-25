@@ -67,6 +67,7 @@ export async function nextUntil(page: Page, title: string) {
 export interface TypeSpec {
   label: string;
   count: number;
+  clase?: string;
 }
 
 /** Abre el asistente y rellena nombre y tipos; deja el asistente en «Qué lleva cada carta». */
@@ -78,7 +79,8 @@ export async function startWizard(page: Page, name: string, types: TypeSpec[]) {
   const rows = page.locator('table.types tbody tr');
   for (const [i, t] of types.entries()) {
     if (i > 0) await page.getByRole('button', { name: '＋ Añadir tipo' }).click();
-    await rows.nth(i).locator('input[type=text]').fill(t.label);
+    await rows.nth(i).locator('input[type=text]:not(.clase)').fill(t.label);
+    if (t.clase) await rows.nth(i).locator('input.clase').fill(t.clase);
     await rows.nth(i).locator('input[type=number]').fill(String(t.count));
   }
   await next(page);

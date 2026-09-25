@@ -1,5 +1,5 @@
 import { parseAttributes, type AttributeValue } from './attributes';
-import { compactKey, conventionalId, parseNumbered } from './naming';
+import { compactKey, conventionalId, parseNumbered, typeMatchKey } from './naming';
 import { normalizeKey } from './text';
 import type { CardRow, Project, Rect } from './types';
 
@@ -72,41 +72,47 @@ export function columnInfo(project: Project, columns: string[]): Record<string, 
 export interface ByName {
   /** Fila → ruta de su imagen (dentro de assets/). */
   assigned: Map<number, string>;
+  /** Fila → ruta de su imagen de referencia («…(ref).png»). */
+  refs: Map<number, string>;
   /** Tipos con imágenes numeradas más allá de sus cartas: cuántas tienen y cuántas harían falta. */
   grow: { tipo: string; have: number; want: number }[];
 }
 
 /**
- * Asigna imágenes a las cartas por su nombre: el id de la carta («lugar001.png») o el tipo y su
- * número dentro del tipo, en el orden de la tabla («Lugar-3.jpg» → la tercera de Lugar).
- * Solo en las celdas vacías de la columna de imagen.
+ * Asigna imágenes a las cartas por su nombre: el id de la carta («elfo-ataque-001.png») o su tipo
+ * (con su clase) y su número dentro del tipo, en el orden de la tabla («Elfos-Ataque-3.jpg» → la
+ * tercera de «Elfo Ataque»). Las de referencia («…(ref).png») van a la columna de referencia.
+ * Solo en celdas vacías.
  */
-export function imagesByName(rows: CardRow[], column: string, paths: string[]): ByName {
-  const slug = (s: string) => compactKey(s);
-  const byStem = new Map(paths.map((p) => [slug((p.split('/').pop() ?? p).replace(/\.[^.]+$/, '')), p]));
-  const numbered = paths.map((p) => [p, parseNumbered(p)] as const).filter(([, n]) => n);
-  const assigned = new Map<number, string>();
-  const used = new Set(rows.map((r) => r[column]?.trim()).filter(Boolean));
+export function imagesByName(rows: CardRow[], column: string, paths: string[], refColumn = 'referencia'): ByName {
+  const parsed = paths.map((p) => ({ path: p, num: parseNumbered(p), ref: isRefFile(p), stem: compactKey(stripRef(p)) }));
+  const out: ByName = { assigned: new Map(), refs: new Map(), grow: [] };
+  const used = new Set(rows.flatMap((r) => [r[column]?.trim(), r[refColumn]?.trim()]).filter(Boolean));
   const position = new Map<string, number>();
   const count = new Map<string, { label: string; n: number }>();
   rows.forEach((row, i) => {
-    const tipo = compactKey(row.tipo ?? '');
+    const tipo = typeMatchKey(row.tipo ?? '');
     const pos = (position.get(tipo) ?? 0) + 1;
     position.set(tipo, pos);
     count.set(tipo, { label: row.tipo ?? '', n: pos });
-    if (row[column]?.trim()) return;
-    const byId = row.id?.trim() ? byStem.get(slug(row.id)) : undefined;
-    const byNum = numbered.find(([, n]) => n!.base === tipo && n!.n === pos)?.[0];
-    const path = [byId, byNum].find((p) => p && !used.has(p));
-    if (path) {
-      assigned.set(i, path);
-      used.add(path);
+    for (const ref of [false, true]) {
+      const col = ref ? refColumn : column;
+      if (row[col]?.trim()) continue;
+      const pool = parsed.filter((x) => x.ref === ref && !used.has(x.path));
+      const hit =
+        (row.id?.trim() && pool.find((x) => x.stem === compactKey(row.id))) || pool.find((x) => x.num?.key === tipo && x.num.n === pos);
+      if (hit) {
+        (ref ? out.refs : out.assigned).set(i, hit.path);
+        used.add(hit.path);
+      }
     }
   });
-  const grow: ByName['grow'] = [];
   for (const [tipo, c] of count) {
-    const want = Math.max(0, ...numbered.filter(([, n]) => n!.base === tipo).map(([, n]) => n!.n));
-    if (want > c.n) grow.push({ tipo: c.label, have: c.n, want });
+    const want = Math.max(0, ...parsed.filter((x) => x.num?.key === tipo).map((x) => x.num!.n));
+    if (want > c.n) out.grow.push({ tipo: c.label, have: c.n, want });
   }
-  return { assigned, grow };
+  return out;
 }
+
+const stripRef = (p: string) => (p.split('/').pop() ?? p).replace(/\.[^.]+$/, '').replace(/[\s._-]*\(?\s*ref(erencia)?\s*\)?$/i, '');
+const isRefFile = (p: string) => stripRef(p) !== (p.split('/').pop() ?? p).replace(/\.[^.]+$/, '');

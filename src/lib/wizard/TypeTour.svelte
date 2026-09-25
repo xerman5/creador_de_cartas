@@ -6,6 +6,7 @@
     ELEMENTS as CONTENT,
     fontStack,
     isAbility,
+    typeLabel,
     mergeFine,
     type FineTune,
     type IconStyle,
@@ -200,8 +201,8 @@
       {@const key = attrKey(at)}
       {#if key && (kind === 'icon') === isAbility(at)}
         <div class="attr">
-          <label class="inline" title="¿Lo lleva «{t.label}»?">
-            <input type="checkbox" checked={src.attributes.includes(key)} onchange={(e) => toggleAttr(key, e.currentTarget.checked)} aria-label="«{t.label}» lleva {at.label}" />
+          <label class="inline" title="¿Lo lleva «{typeLabel(t)}»?">
+            <input type="checkbox" checked={src.attributes.includes(key)} onchange={(e) => toggleAttr(key, e.currentTarget.checked)} aria-label="«{typeLabel(t)}» lleva {at.label}" />
           </label>
           <ResourceSlot
             url={iconUrl(at)}
@@ -223,8 +224,8 @@
     <button class="small" onclick={() => newAttr(kind)}>＋ {kind === 'icon' ? 'Habilidad' : 'Atributo'}</button>
   </div>
   <p class="hint">
-    Marca los que lleva «{t.label}». Cambiar la clase mueve el atributo entre «Atributos» (con número) y «Habilidades» (solo icono), en
-    todos los tipos.{#if src !== t} «{t.label}» es igual que «{src.label}»: los cambios valen para los dos.{/if}
+    Marca los que lleva «{typeLabel(t)}». Cambiar la clase mueve el atributo entre «Atributos» (con número) y «Habilidades» (solo icono), en
+    todos los tipos.{#if src !== t} «{typeLabel(t)}» es igual que «{typeLabel(src)}»: los cambios valen para los dos.{/if}
   </p>
 {/snippet}
 
@@ -232,7 +233,7 @@
   <div class="tour">
     <div class="head">
       <div class="where">
-        <b>{t.label || `Tipo ${current + 1}`}</b>
+        <b>{typeLabel(t) || `Tipo ${current + 1}`}</b>
         {#if many}<small>tipo {current + 1} de {answers.types.length}</small>{/if}
         <small>· elemento {element + 1} de {elements.length}</small>
       </div>
@@ -241,13 +242,13 @@
           <span>Estos cambios valen para</span>
           <div class="seg" role="group" aria-label="A qué tipos se aplican los cambios">
             <button class:active={scope === 'all'} onclick={() => (scope = 'all')}>Todos los tipos</button>
-            <button class:active={scope === 'type'} onclick={() => (scope = 'type')}>Solo «{t.label}»</button>
+            <button class:active={scope === 'type'} onclick={() => (scope = 'type')}>Solo «{typeLabel(t)}»</button>
           </div>
         </div>
       {/if}
     </div>
 
-    <ol class="els" aria-label="Elementos de {t.label}">
+    <ol class="els" aria-label="Elementos de {typeLabel(t)}">
       {#each elements as e, i}
         <li>
           <button class:active={i === element} class:own={hasOwn(t, e)} onclick={() => ongo(current, i)} title={hasOwn(t, e) ? 'Con ajustes propios de este tipo' : undefined}>
@@ -259,7 +260,7 @@
         <li>
           <select
             class="add"
-            aria-label="Añadir un elemento a {t.label}"
+            aria-label="Añadir un elemento a {typeLabel(t)}"
             value=""
             onchange={(e) => {
               const v = e.currentTarget.value as ElementKey;
@@ -279,7 +280,7 @@
       <p class="hint">{E.hint}</p>
       {#if many && hasOwn(t, E) && where === 'all'}
         <p class="warn">
-          «{t.label}» tiene ajustes propios en este elemento, que mandan sobre los de todos.
+          «{typeLabel(t)}» tiene ajustes propios en este elemento, que mandan sobre los de todos.
           <button class="small" onclick={() => clearOwn(t, E)}>Quitarlos</button>
         </p>
       {/if}
@@ -482,13 +483,13 @@
 
       <div class="foot">
         {#if ELEMENT_OF[E.id]}
-          <button class="ghost small" onclick={() => removeElement(ELEMENT_OF[E.id]!)} title={src !== t ? `También en «${src.label}»` : undefined}>
-            Quitar {E.id === 'atributos' || E.id === 'habilidades' ? 'atributos y habilidades' : `«${E.label}»`} de «{t.label}»
+          <button class="ghost small" onclick={() => removeElement(ELEMENT_OF[E.id]!)} title={src !== t ? `También en «${typeLabel(src)}»` : undefined}>
+            Quitar {E.id === 'atributos' || E.id === 'habilidades' ? 'atributos y habilidades' : `«${E.label}»`} de «{typeLabel(t)}»
           </button>
           <span class="grow"></span>
         {/if}
         <button class="ghost small" onclick={reset}>
-          {where === 'type' ? `Quitar los ajustes propios de «${t.label}» aquí` : 'Restablecer este elemento'}
+          {where === 'type' ? `Quitar los ajustes propios de «${typeLabel(t)}» aquí` : 'Restablecer este elemento'}
         </button>
       </div>
     </section>

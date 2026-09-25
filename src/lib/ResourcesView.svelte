@@ -57,26 +57,36 @@
   function assignByName() {
     const lp = ws.lp;
     if (!lp || !imageColumn) return;
-    const paths = images.filter((p) => shelfOf(p) === 'ilustraciones');
+    const paths = images.filter((p) => shelfOf(p) === 'ilustraciones' || shelfOf(p) === 'referencias');
     const r = imagesByName(lp.rows, imageColumn, paths);
-    if (r.assigned.size)
-      ws.updateRows((rows) => {
+    if (r.assigned.size || r.refs.size)
+      ws.updateRows((rows, columns) => {
+        // Las referencias van a su propia columna, que se crea si hace falta.
+        if (r.refs.size && !columns.includes('referencia')) columns.push('referencia');
         for (const [i, path] of r.assigned) rows[i] = { ...rows[i], [imageColumn]: path };
+        for (const [i, path] of r.refs) rows[i] = { ...rows[i], referencia: path };
       });
     growOffer = r.grow;
-    report = r.assigned.size
-      ? `${r.assigned.size} ${r.assigned.size === 1 ? 'ilustración asignada' : 'ilustraciones asignadas'} por su nombre en la columna «${imageColumn}» (guarda para escribirlas en el CSV).`
-      : 'Ninguna ilustración nueva que asignar: los nombres no coinciden con ninguna carta sin imagen.';
+    const parts = [
+      r.assigned.size && `${r.assigned.size} ${r.assigned.size === 1 ? 'ilustración asignada' : 'ilustraciones asignadas'} en «${imageColumn}»`,
+      r.refs.size && `${r.refs.size} ${r.refs.size === 1 ? 'referencia' : 'referencias'} en «referencia»`,
+    ].filter(Boolean);
+    report = parts.length
+      ? `Por su nombre: ${parts.join(' y ')} (guarda para escribirlas en el CSV).`
+      : 'Nada nuevo que asignar: los nombres no coinciden con ninguna carta sin imagen.';
   }
 
   /** Cartas nuevas para las imágenes numeradas que no tienen carta: «lugar012.png» con 10 lugares. */
   function growRows(g: { tipo: string; have: number; want: number }) {
     ws.updateRows((rows, columns) => {
       let at = rows.map((r) => r.tipo).lastIndexOf(g.tipo) + 1;
+      const model = rows[at - 1];
       for (let n = g.have; n < g.want; n++) {
         const row = Object.fromEntries(columns.map((c) => [c, ''])) as Record<string, string>;
         row.id = nextId(rows, g.tipo);
         row.tipo = g.tipo;
+        // Con clases, la carta nueva es de la misma clase y subclase que las de su tipo.
+        for (const c of ['clase', 'subclase']) if (columns.includes(c) && model?.[c]) row[c] = model[c];
         rows.splice(at++, 0, row);
       }
     });
@@ -161,12 +171,13 @@
         onremove={writable ? remove : undefined}
         empty={writable ? 'Vacío: suelta aquí tus archivos.' : 'Vacío.'}
       />
-      {#if shelf.id === 'ilustraciones' && list.length && imageColumn}
+      {#if (shelf.id === 'ilustraciones' || shelf.id === 'referencias') && list.length && imageColumn}
         <div class="row">
           <button class="small" onclick={assignByName}>Asignar por nombre</button>
           <span class="hint">
-            A cada carta sin ilustración, la que se llama como su id (<code>lugar001.png</code>) o como su tipo y su número
-            (<code>Lugar-3.jpg</code> es la tercera de Lugar).
+            A cada carta sin imagen, la que se llama como su id (<code>elfo-ataque-001.png</code>) o como su clase, su tipo y su
+            número (<code>Elfos-Ataque-3.jpg</code> es la tercera de «Elfo Ataque»). Las de referencia (<code>…(ref).png</code>), a la
+            columna «referencia».
           </span>
         </div>
         {#each growOffer as g}

@@ -10,7 +10,7 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
   { key: 'flavor', label: 'Texto de ambientación', hint: 'Una frase en cursiva que no afecta al juego.' },
   { key: 'cost', label: 'Coste', hint: 'Un número en una esquina: lo que cuesta jugarla.' },
   { key: 'stats', label: 'Atributos y habilidades', hint: 'Iconos con número (Ataque 3, Vida 5) o solo icono (Volar, Veneno).' },
-  { key: 'variant', label: 'Rareza, clan o facción', hint: 'Una categoría con su color: común/rara, un clan, una facción…' },
+  { key: 'variant', label: 'Rareza o categoría', hint: 'Una marca de color que cambia de carta a carta: común/rara/épica… (las clases van aparte, en los tipos).' },
   { key: 'number', label: 'Número de colección', hint: '«012/120» en el pie de la carta.' },
 ];
 
@@ -22,12 +22,15 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
 export type CardData = Record<string, string>;
 
 export interface TypeAnswer {
+  /** El tipo o subclase: «Ataque», «Lugar». */
   label: string;
+  /** Clase a la que pertenece (opcional): «Elfo». Cada clase + subclase es un tipo con su propia maqueta. */
+  clase?: string;
   count: number;
   elements: ElementKey[];
   /** Claves de los atributos que usa este tipo (sin el coste). */
   attributes: string[];
-  /** Mismo contenido que otro tipo (su etiqueta): comparte elementos y atributos. */
+  /** Mismo contenido que otro tipo (su nombre completo, `fullName`): comparte elementos y atributos. */
   sameAs?: string;
   /** Datos de sus cartas, en orden; puede tener menos filas que `count`. */
   cards?: CardData[];
@@ -253,7 +256,11 @@ export function textKey(field: string, lang: string, langs: string[]): string {
   return langs.length > 1 ? `${field}-${lang}` : field;
 }
 
-export const typeKey = (t: Pick<TypeAnswer, 'label'>) => normalizeKey(t.label);
+/** Nombre completo de un tipo: «Elfo Ataque» (o «Lugar» sin clase). Es el valor de la columna «tipo» y el de su plantilla. */
+export const fullName = (t: Pick<TypeAnswer, 'label' | 'clase'>) => [t.clase?.trim(), t.label.trim()].filter(Boolean).join(' ');
+/** Para enseñar: «Elfo · Ataque». */
+export const typeLabel = (t: Pick<TypeAnswer, 'label' | 'clase'>) => [t.clase?.trim(), t.label.trim()].filter(Boolean).join(' · ');
+export const typeKey = (t: Pick<TypeAnswer, 'label' | 'clase'>) => normalizeKey(fullName(t));
 export const attrKey = (a: Pick<AttrAnswer, 'label'>) => normalizeKey(a.label);
 
 /**

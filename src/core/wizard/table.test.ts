@@ -39,7 +39,7 @@ describe('fillCsv + importCsv', () => {
     const { types, report } = importCsv(a, csv);
     expect(report).toEqual({ byType: { Clan: 3, Lugar: 2 }, unknownTypes: [], ignored: [] });
     expect(types[0].cards![0]).toEqual({
-      id: 'clan001',
+      id: 'clan-001',
       titulo: 'Lobos',
       descripcion: 'Aúllan.',
       coste: '2',
@@ -48,7 +48,7 @@ describe('fillCsv + importCsv', () => {
       ilustracion: 'lobos.png',
       copias: '3',
     });
-    expect(types[0].cards![1]).toEqual({ id: 'clan002' });
+    expect(types[0].cards![1]).toEqual({ id: 'clan-002' });
     expect(types[1].count).toBe(2);
   });
 
@@ -120,5 +120,48 @@ describe('habilidades (solo icono)', () => {
     expect(rows[1].atributos).not.toContain('volar');
     // La tercera no tiene nada escrito: ejemplo alterno (carta 3 → sí).
     expect(rows[2].atributos).toMatch(/\| volar$/);
+  });
+});
+
+describe('clases y subclases', () => {
+  function elves(): WizardAnswers {
+    return {
+      ...defaultAnswers(),
+      name: 'Reinos',
+      types: [
+        { clase: 'Elfo', label: 'Ataque', count: 2, elements: ['art', 'rules'], attributes: [] },
+        { clase: 'Orco', label: 'Ataque', count: 1, elements: ['art', 'rules'], attributes: [] },
+        { label: 'Lugar', count: 1, elements: ['art'], attributes: [] },
+      ],
+    };
+  }
+
+  it('el proyecto: tipo = clase + subclase, columnas clase y subclase, ids por clase y subclase', () => {
+    const a = elves();
+    a.types[0].cards = [{ referencia: 'referencias/elfo-ataque-001(ref).png' }];
+    const built = buildProject(a);
+    expect(Object.keys(built.project.templates).sort()).toEqual(['elfo ataque', 'lugar', 'orco ataque', 'trasera']);
+    const rows = Papa.parse<Record<string, string>>(built.csv, { header: true, delimiter: ',' }).data;
+    expect(rows.slice(0, 4).map((r) => [r.id, r.tipo, r.clase, r.subclase])).toEqual([
+      ['elfo-ataque-001', 'Elfo Ataque', 'Elfo', 'Ataque'],
+      ['elfo-ataque-002', 'Elfo Ataque', 'Elfo', 'Ataque'],
+      ['orco-ataque-001', 'Orco Ataque', 'Orco', 'Ataque'],
+      ['lugar-001', 'Lugar', '', 'Lugar'],
+    ]);
+    expect(rows[0].referencia).toBe('referencias/elfo-ataque-001(ref).png');
+    expect(rows[0].titulo).toBe('Elfo Ataque 1');
+  });
+
+  it('ida y vuelta por el CSV para rellenar; también con el tipo en plural o solo con clase y subclase', () => {
+    const a = elves();
+    a.types[1].cards = [{ titulo: 'Grito de guerra', referencia: 'referencias/r.png' }];
+    const csv = fillCsv(a);
+    expect(csv.split('\r\n')[0]).toBe('﻿id;tipo;clase;subclase;titulo;descripcion;ilustracion;encuadre;referencia;copias');
+    const { types, report } = importCsv(a, csv);
+    expect(report.byType).toEqual({ 'Elfo · Ataque': 2, 'Orco · Ataque': 1, Lugar: 1 });
+    expect(types[1].cards).toEqual([{ id: 'orco-ataque-001', titulo: 'Grito de guerra', referencia: 'referencias/r.png' }]);
+    const own = importCsv(a, 'tipo,clase,subclase,titulo\nOrcos Ataques,,,Hacha\n,Elfo,Ataque,Arco\n');
+    expect(own.types[1].cards).toEqual([{ titulo: 'Hacha' }]);
+    expect(own.types[0].cards).toEqual([{ titulo: 'Arco' }]);
   });
 });

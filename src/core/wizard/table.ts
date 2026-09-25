@@ -2,7 +2,8 @@ import Papa from 'papaparse';
 import { parseAttributes } from '../attributes';
 import { parseCsv } from '../csv';
 import { normalizeKey } from '../text';
-import { attrKey, flagOn, isAbility, resolvedType, textKey, typeKey, type CardData, type TypeAnswer, type WizardAnswers } from './answers';
+import { typeMatchKey } from '../naming';
+import { attrKey, flagOn, fullName, isAbility, resolvedType, textKey, typeKey, typeLabel, type CardData, type TypeAnswer, type WizardAnswers } from './answers';
 import { BACK_TEMPLATE, cardIds, PLACEHOLDERS } from './build';
 
 export interface TableColumn {
@@ -50,6 +51,9 @@ export function tableColumns(a: WizardAnswers, types: TypeAnswer[], lang?: strin
     // El encuadre se ajusta arrastrando la imagen, no escribiendo: va en el CSV pero no en la tabla.
     cols.push({ key: 'encuadre', header: 'encuadre', label: 'Encuadre', kind: 'crop' });
   }
+  // La referencia (un boceto que se ve al lado de la carta) solo aparece si alguna carta la tiene.
+  if (types.some((t) => t.cards?.some((c) => c.referencia?.trim())))
+    cols.push({ key: 'referencia', header: 'referencia', label: 'Referencia', kind: 'image' });
   cols.push({ key: 'copias', header: 'copias', label: 'Copias', kind: 'number' });
   return cols;
 }
@@ -62,16 +66,18 @@ export function fillCsv(a: WizardAnswers): string {
   const types = a.types.filter((t) => t.label.trim());
   const cols = tableColumns(a, types);
   const ids = cardIds(types);
+  const withClases = types.some((t) => t.clase?.trim());
   const rows: string[][] = [];
   types.forEach((t, i) => {
     for (let k = 0; k < t.count; k++) {
       const data = t.cards?.[k] ?? {};
       // La primera columna es siempre «id»; «tipo» va justo detrás.
       const value = (c: TableColumn) => (c.kind === 'flag' ? (flagOn(data[c.key]) ? 'x' : '') : (data[c.key] ?? ''));
-      rows.push([data.id?.trim() || ids[i](k + 1), t.label.trim(), ...cols.slice(1).map(value)]);
+      const clase = withClases ? [t.clase?.trim() ?? '', t.label.trim()] : [];
+      rows.push([data.id?.trim() || ids[i](k + 1), fullName(t), ...clase, ...cols.slice(1).map(value)]);
     }
   });
-  const fields = ['id', 'tipo', ...cols.slice(1).map((c) => c.header)];
+  const fields = ['id', 'tipo', ...(withClases ? ['clase', 'subclase'] : []), ...cols.slice(1).map((c) => c.header)];
   return '﻿' + Papa.unparse({ fields, data: rows }, { delimiter: ';', newline: '\r\n' }) + '\r\n';
 }
 
@@ -85,7 +91,7 @@ export interface ImportReport {
 }
 
 const ALIASES: Record<string, string> = { nombre: 'titulo', texto: 'descripcion', reglas: 'descripcion', ambientacion: 'sabor', imagen: 'ilustracion' };
-const SILENT = new Set(['numero', 'trasera', 'color', 'tipo', 'id']);
+const SILENT = new Set(['numero', 'trasera', 'color', 'tipo', 'id', 'clase', 'subclase']);
 const VARIANT_NAMES = ['rareza', 'faccion', 'clan', 'elemento'];
 /** Textos de relleno del asistente (las reglas de ejemplo pueden llevar un icono detrás). */
 const isPlaceholder = (v: string) => Object.values(PLACEHOLDERS).some((p) => v === p.flavor || v.startsWith(p.rules));
@@ -129,19 +135,31 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
     else if (header === variantCol || VARIANT_NAMES.includes(header)) mapping.set(header, (d, v) => (d.variante = v));
     else if (base === 'ilustracion') mapping.set(header, (d, v) => (d.ilustracion = v));
     else if (header === 'encuadre') mapping.set(header, (d, v) => (d.encuadre = v));
+    else if (header === 'referencia') mapping.set(header, (d, v) => (d.referencia = v));
     else if (header === 'copias') mapping.set(header, (d, v) => (d.copias = v));
     else if (!SILENT.has(header)) report.ignored.push(header);
   }
 
   const byKey = new Map(a.types.map((t, i) => [typeKey(t), i]));
+  // Sin coincidencia exacta, se admite el tipo escrito en plural o con otros separadores («Elfos-Ataques»).
+  const byMatch = new Map(a.types.map((t, i) => [typeMatchKey(t.clase, t.label), i]));
+  const find = (row: Record<string, string>): number | undefined => {
+    const tipo = (row.tipo ?? '').trim();
+    const withClase = row.clase?.trim() ? `${row.clase.trim()} ${row.subclase?.trim() || tipo}` : '';
+    for (const name of [tipo, withClase].filter(Boolean)) {
+      const i = byKey.get(normalizeKey(name)) ?? byMatch.get(typeMatchKey(name));
+      if (i !== undefined) return i;
+    }
+    return undefined;
+  };
   const incoming = new Map<number, CardData[]>();
   const unknown = new Set<string>();
   for (const row of csv.rows) {
     const tipo = (row.tipo ?? '').trim();
     if (normalizeKey(tipo) === BACK_TEMPLATE) continue;
-    const index = tipo ? byKey.get(normalizeKey(tipo)) : fallbackType;
+    const index = tipo || row.clase?.trim() ? find(row) : fallbackType;
     if (index === undefined) {
-      unknown.add(tipo);
+      unknown.add(tipo || `${row.clase ?? ''} ${row.subclase ?? ''}`.trim());
       continue;
     }
     const data: CardData = {};
@@ -150,12 +168,13 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
       const v = (row[header] ?? '').trim();
       if (v && !isPlaceholder(v)) apply(data, v);
     }
-    // Lo que el asistente pone de relleno («Criatura 3», el nombre del tipo como línea de tipo) no es un dato.
-    const label = a.types[index].label.trim();
-    const numbered = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\d+$`);
+    // Lo que el asistente pone de relleno («Elfo Ataque 3», el nombre del tipo como línea de tipo) no es un dato.
+    const t = a.types[index];
+    const numbered = new RegExp(`^${fullName(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\d+$`);
     for (const l of langs) {
       if (numbered.test(data[textKey('titulo', l, langs)] ?? '')) delete data[textKey('titulo', l, langs)];
-      if (data[textKey('subtipo', l, langs)] === label) delete data[textKey('subtipo', l, langs)];
+      const sub = data[textKey('subtipo', l, langs)];
+      if (sub === typeLabel(t) || sub === t.label.trim()) delete data[textKey('subtipo', l, langs)];
     }
     incoming.set(index, [...(incoming.get(index) ?? []), data]);
   }
@@ -163,7 +182,7 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
   const types = a.types.map((t, i) => {
     const cards = incoming.get(i);
     if (!cards) return t;
-    report.byType[t.label] = cards.length;
+    report.byType[typeLabel(t)] = cards.length;
     return { ...t, cards, count: cards.length };
   });
   report.unknownTypes = [...unknown];

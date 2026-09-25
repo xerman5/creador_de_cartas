@@ -104,7 +104,7 @@ describe('aplicar el asistente sobre el proyecto', () => {
       .join('\n')
       .concat('MIA-1,mia,Carta propia,,,,,,x\n');
     const out = rows(mergeCsv(built.csv, current, ['Criatura', 'Hechizo']));
-    expect(out[0]).toMatchObject({ id: 'criatura001', notas: 'revisar' });
+    expect(out[0]).toMatchObject({ id: 'criatura-001', notas: 'revisar' });
     expect(out.find((r) => r.id === 'MIA-1')).toMatchObject({ tipo: 'mia', titulo: 'Carta propia' });
     expect(out).toHaveLength(rows(built.csv).length + 1);
   });

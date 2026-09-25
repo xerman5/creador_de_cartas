@@ -1,6 +1,6 @@
 import type { Zone } from '../../core/types';
 import { normalizeKey } from '../../core/text';
-import type { ElementKey, FineTune, TypeAnswer, WizardAnswers } from '../../core/wizard/answers';
+import { typeKey, type ElementKey, type FineTune, type TypeAnswer, type WizardAnswers } from '../../core/wizard/answers';
 import type { ShelfId } from '../../core/wizard/resources';
 
 /** Biblioteca del asistente (iconos y fondos subidos). */
@@ -71,7 +71,7 @@ export function contentType(answers: WizardAnswers, t: TypeAnswer): TypeAnswer {
   const seen = new Set<TypeAnswer>();
   while (cur.sameAs && !seen.has(cur)) {
     seen.add(cur);
-    const next = answers.types.find((o) => normalizeKey(o.label) === normalizeKey(cur.sameAs!));
+    const next = answers.types.find((o) => typeKey(o) === normalizeKey(cur.sameAs!));
     if (!next) break;
     cur = next;
   }

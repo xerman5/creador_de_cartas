@@ -31,9 +31,9 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
   await rows.first().click();
   await page.getByRole('button', { name: '＋ Carta' }).click();
   await expect(rows).toHaveCount(5);
-  await expect(page.getByLabel('id, fila 2')).toHaveValue('criatura004');
+  await expect(page.getByLabel('id, fila 2')).toHaveValue('criatura-004');
   await page.getByRole('button', { name: 'Duplicar' }).click();
-  await expect(page.getByLabel('id, fila 3')).toHaveValue('criatura005');
+  await expect(page.getByLabel('id, fila 3')).toHaveValue('criatura-005');
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Quitar' }).click();
   await expect(rows).toHaveCount(5);
@@ -63,7 +63,7 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
   await expect.poll(async () => (await readFolderFile(page, 'tabla', 'cartas.csv')) ?? '').toContain('Lobo');
   const csv = (await readFolderFile(page, 'tabla', 'cartas.csv'))!;
   expect(csv.split('\n')[0]).toBe('id,tipo,titulo,descripcion,sabor,atributos,ilustracion,encuadre,numero,copias');
-  expect(csv).toMatch(/criatura001,Criatura,Lobo,.*ataque:9/);
+  expect(csv).toMatch(/criatura-001,Criatura,Lobo,.*ataque:9/);
 
   expect(errors).toEqual([]);
 });

@@ -11,6 +11,8 @@ import {
   resolvedType,
   textKey,
   typeKey,
+  fullName,
+  typeLabel,
   type CardData,
   type CardImages,
   type ElementKey,
@@ -61,9 +63,9 @@ export function projectFiles(built: BuiltProject): Record<string, string> {
   return { [PROJECT_FILE]: serializeProject(built.project), [built.project.csv]: built.csv, ...built.files };
 }
 
-/** Id por defecto de la carta `k` (desde 1) de cada tipo, con la convención tipo + número: «lugar001». */
-export function cardIds(types: { label: string }[]): ((k: number) => string)[] {
-  return types.map((t) => (k: number) => conventionalId(t.label, k));
+/** Id por defecto de la carta `k` (desde 1) de cada tipo, con la convención clase + tipo + número: «elfo-ataque-001». */
+export function cardIds(types: { label: string; clase?: string }[]): ((k: number) => string)[] {
+  return types.map((t) => (k: number) => conventionalId([t.clase, t.label], k));
 }
 
 function backTemplate(answers: WizardAnswers, f: number): Template {
@@ -278,10 +280,10 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       size,
     );
     const art = zones.find((z) => z.id === 'ilustracion');
-    if (art) files[`assets/${artPath(key)}`] = artSvg(art.rect.w, art.rect.h, palette, i * 47, `${t.label} · ilustración provisional`);
+    if (art) files[`assets/${artPath(key)}`] = artSvg(art.rect.w, art.rect.h, palette, i * 47, `${typeLabel(t)} · ilustración provisional`);
     const tpl: Template = { zones };
     if (a.backs !== 'none') {
-      const backId = a.backs === 'common' ? 'trasera' : `trasera-${conventionalId(t.label, 1).replace(/\d+$/, '')}`;
+      const backId = a.backs === 'common' ? 'trasera' : `trasera-${conventionalId([t.clase, t.label], 1).replace(/-\d+$/, '')}`;
       tpl.back = backId;
       backIds.set(key, backId);
     }
@@ -305,13 +307,17 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   };
 
   // CSV con las columnas exactas y filas de ejemplo.
-  const fields = ['id', 'tipo', ...langs.map((l) => col('titulo', l))];
+  // Con clases, cada carta dice su clase y su subclase (además de su tipo, que es la combinación).
+  const withClases = types.some((t) => t.clase?.trim());
+  const fields = ['id', 'tipo', ...(withClases ? ['clase', 'subclase'] : []), ...langs.map((l) => col('titulo', l))];
   if (any('subtitle')) fields.push(...langs.map((l) => col('subtipo', l)));
   if (any('rules')) fields.push(...langs.map((l) => col('descripcion', l)));
   if (any('flavor')) fields.push(...langs.map((l) => col('sabor', l)));
   if (usesCost || any('stats')) fields.push('atributos');
   if (usesVariant) fields.push(variantCol);
   if (any('art')) fields.push('ilustracion', 'encuadre');
+  // Referencias («…(ref).png»): se ven al lado de la carta mientras se diseña, nunca en ella.
+  if (types.some((t) => t.cards?.some((c) => c.referencia?.trim()))) fields.push('referencia');
   if (any('number')) fields.push('numero');
   fields.push('copias');
   if (a.backs === 'per-type') fields.push('color');
@@ -332,11 +338,12 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       const own = (key: string) => (data[key] ?? '').trim();
       // Una carta sin nada escrito lleva habilidades de ejemplo; en cuanto se rellena, solo las marcadas.
       const untouched = !Object.entries(data).some(([key, v]) => !['id', 'ilustracion', 'copias'].includes(key) && v.trim());
-      const row: Record<string, string> = { id: own('id') || ids[i](k), tipo: t.label.trim() };
+      const row: Record<string, string> = { id: own('id') || ids[i](k), tipo: fullName(t) };
+      if (withClases) Object.assign(row, { clase: t.clase?.trim() ?? '', subclase: t.label.trim() });
       for (const l of langs) {
         const ph = PLACEHOLDERS[l] ?? PLACEHOLDERS.es;
-        row[col('titulo', l)] = own(col('titulo', l)) || `${t.label.trim()} ${k}`;
-        if (r.elements.has('subtitle')) row[col('subtipo', l)] = own(col('subtipo', l)) || t.label.trim();
+        row[col('titulo', l)] = own(col('titulo', l)) || `${fullName(t)} ${k}`;
+        if (r.elements.has('subtitle')) row[col('subtipo', l)] = own(col('subtipo', l)) || typeLabel(t);
         if (r.elements.has('rules'))
           row[col('descripcion', l)] = own(col('descripcion', l)) || (firstStat && k === 1 ? `${ph.rules} {${firstStat}}` : ph.rules);
         if (r.elements.has('flavor')) row[col('sabor', l)] = own(col('sabor', l)) || ph.flavor;
@@ -354,6 +361,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
         row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;
       if (r.elements.has('art') && own('ilustracion')) row.ilustracion = own('ilustracion');
       if (r.elements.has('art') && own('encuadre')) row.encuadre = own('encuadre');
+      if (own('referencia')) row.referencia = own('referencia');
       if (own('copias')) row.copias = own('copias');
       if (r.elements.has('number')) row.numero = `${String(serial).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
       rows.push(row);
@@ -365,7 +373,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       const row: Record<string, string> = { id: backIds.get(typeKey(t))!, tipo: BACK_TEMPLATE, color: shiftColor(palette.acento, i * 67, 0.28) };
       for (const l of langs) {
         row[col('titulo', l)] = a.name.trim();
-        row[col('subtipo', l)] = t.label.trim();
+        row[col('subtipo', l)] = typeLabel(t);
       }
       rows.push(row);
     });
