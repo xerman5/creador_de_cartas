@@ -138,7 +138,7 @@ describe('layoutZones: todas las combinaciones', () => {
           design,
           elements: new Set<ElementKey>(art ? ['art', 'stats', 'rules'] : ['stats', 'rules']),
           size: SIZES[0],
-          adjust: defaultAnswers().adjust,
+          adjust: { ...defaultAnswers().adjust, attrSide: 'bottom' },
           tipo: 't',
           statKeys: [],
           abilityKeys: ['volar', 'veneno'],
@@ -157,6 +157,32 @@ describe('layoutZones: todas las combinaciones', () => {
         }
       }
     }
+  });
+
+  it('las habilidades se quedan en el lado de los atributos: en su franja si no hay números, o hacia ese lado', () => {
+    const W = SIZES[0].width;
+    for (const design of DESIGNS.map((d) => d.id))
+      for (const attrSide of ['left', 'right'] as const)
+        for (const statKeys of [[], ['vida']]) {
+          const zones = layoutZones({
+            design,
+            elements: new Set<ElementKey>(['art', 'stats', 'rules']),
+            size: SIZES[0],
+            adjust: { ...defaultAnswers().adjust, attrSide },
+            tipo: 't',
+            statKeys,
+            abilityKeys: ['volar', 'veneno'],
+            variantColumn: 'rareza',
+          });
+          const ab = zones.find((z) => z.id === 'habilidades') as { rect: Rect; align: string; direction: string };
+          const where = `${design}/${attrSide}/${statKeys.length}`;
+          if (design !== 'texto' && !statKeys.length) {
+            // En la franja lateral, como los atributos con número.
+            expect(ab.direction, where).toBe('column');
+            const mid = ab.rect.x + ab.rect.w / 2;
+            expect(attrSide === 'left' ? mid < W / 3 : mid > (W * 2) / 3, where).toBe(true);
+          } else expect(ab.align, where).toBe(attrSide === 'left' ? 'start' : 'end');
+        }
   });
 });
 
