@@ -109,13 +109,14 @@
   const start = resume;
   const draft = start ? null : loadDraft();
   // Retomando, se vuelve adonde se dejó; si se dejó al crear, al recorrido (lo más probable es retocar).
-  const firstStep = start ? (start.file.step === 'crear' ? 'recorrido' : start.file.step) : (draft?.step ?? 0);
+  const firstStep = start ? (start.jump || start.file.step === 'crear' ? 'recorrido' : start.file.step) : (draft?.step ?? 0);
   let answers = $state<WizardAnswers>(start?.answers ?? draft?.answers ?? defaultAnswers());
   let step = $state(stepIndex(firstStep));
   let reached = $state(start ? STEPS.length - 1 : stepIndex(firstStep));
   /** Respuestas al entrar, para saber si hay cambios sin aplicar. */
   const initial = JSON.stringify(start?.answers ?? null);
-  let current = $state(0);
+  // svelte-ignore state_referenced_locally
+  let current = $state(Math.max(0, start?.jump ? answers.types.findIndex((t) => typeKey(t) === normalizeKey(start.jump!.type)) : 0));
   /** Carta seleccionada en la tabla (índice dentro del tipo actual). */
   let row = $state(0);
   const stepId = $derived<StepId>(STEPS[step].id);
@@ -489,6 +490,14 @@
   const tour = $derived(tourElements(tplZones));
   /** Elemento del recorrido; puede pasarse del final (volviendo hacia atrás) y se ajusta al dibujar. */
   let tourEl = $state(0);
+  /** Zona a la que se salta al retomar desde una carta: se busca su elemento en cuanto se dibuja la plantilla. */
+  let jumpZone = start?.jump?.zone ?? '';
+  $effect(() => {
+    if (!jumpZone || !tour.length) return;
+    const i = tour.findIndex((e) => e.zones.includes(jumpZone));
+    if (i >= 0) tourEl = i;
+    jumpZone = '';
+  });
   const tourAt = $derived(Math.min(tourEl, Math.max(0, tour.length - 1)));
 
   /** Avanza (o retrocede) un elemento; devuelve false si ya no quedan y hay que cambiar de paso. */

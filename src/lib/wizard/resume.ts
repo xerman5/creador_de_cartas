@@ -21,6 +21,8 @@ export interface ResumeContext {
   resources: Resources;
   /** Ilustraciones de assets/ilustraciones/ (ruta dentro de esa carpeta). */
   images: Map<string, Blob>;
+  /** Entrar directamente al recorrido, en ese tipo y en el elemento que contiene esa zona. */
+  jump?: { type: string; zone: string };
 }
 
 /** Lee asistente.json, el CSV y los recursos del proyecto. `null` si el proyecto no se hizo con el asistente. */

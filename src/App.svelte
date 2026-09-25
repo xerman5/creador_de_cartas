@@ -24,6 +24,8 @@
   let autoReload = $state(false);
   let editorKey = $state(0);
   let editTipo = $state('');
+  let editZone = $state('');
+  let editRow = $state('');
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
   /** Con él, el asistente trabaja sobre el proyecto abierto en vez de crear uno nuevo. */
@@ -36,13 +38,15 @@
     wizard = true;
   }
 
-  async function resumeWizard() {
+  /** `jump`: ir directo al recorrido, a ese tipo y al elemento que contiene esa zona. */
+  async function resumeWizard(jump?: { type: string; zone: string }) {
     const lp = ws.lp;
     if (!lp || !ws.source) return;
     if (ws.dirty && !confirm('Hay cambios sin guardar. El asistente trabaja sobre lo guardado: ¿guardarlos antes de seguir?')) return;
     if (ws.dirty) await ws.save();
     try {
-      resume = await loadResume(ws.source, lp.project);
+      const ctx = await loadResume(ws.source, lp.project);
+      resume = ctx && jump ? { ...ctx, jump } : ctx;
       if (resume) wizard = true;
       else ws.error = 'Este proyecto no se hizo con el asistente (no tiene asistente.json).';
     } catch (e) {
@@ -109,8 +113,10 @@
     }
   }
 
-  function editTemplate(tipo: string) {
+  function editTemplate(tipo: string, zone = '', row = '') {
     editTipo = tipo;
+    editZone = zone;
+    editRow = row;
     editorKey++;
     tab = 'plantillas';
   }
@@ -204,7 +210,7 @@
     {/if}
 
     {#if ws.lp && ws.hasWizard && !wizard}
-      <button class="ghost" onclick={resumeWizard} disabled={ws.loading} title="Volver al asistente con este proyecto para cambiar lo que quieras">Asistente</button>
+      <button class="ghost" onclick={() => resumeWizard()} disabled={ws.loading} title="Volver al asistente con este proyecto para cambiar lo que quieras">Asistente</button>
     {/if}
     <button class="ghost" onclick={openWizard} disabled={ws.loading || wizard} title="Crear un proyecto con el asistente">Nuevo…</button>
     <button class="ghost" onclick={openFolder} disabled={ws.loading}>Abrir…</button>
@@ -259,10 +265,10 @@
       <CardTable {ws} />
     {:else if tab === 'plantillas'}
       {#key editorKey}
-        <TemplateEditor {ws} initialTipo={editTipo} />
+        <TemplateEditor {ws} initialTipo={editTipo} initialZone={editZone} initialRow={editRow} />
       {/key}
     {:else}
-      <CardsView {ws} />
+      <CardsView {ws} onedit={editTemplate} onwizard={ws.hasWizard ? (type, zone) => resumeWizard({ type, zone }) : undefined} />
     {/if}
   </div>
 </div>
