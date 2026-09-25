@@ -18,6 +18,7 @@ import {
   type WizardAnswers,
 } from './answers';
 import { DEFAULT_SAFE_MM } from '../card';
+import { conventionalId } from '../naming';
 import { PROJECT_FILE, serializeProject } from '../project';
 import { normalizeKey } from '../text';
 import type { AttributeDef, CardSize, Project, Template, Zone } from '../types';
@@ -60,21 +61,9 @@ export function projectFiles(built: BuiltProject): Record<string, string> {
   return { [PROJECT_FILE]: serializeProject(built.project), [built.project.csv]: built.csv, ...built.files };
 }
 
-/** Id por defecto de la carta `k` (desde 1) de cada tipo: «CRI-001». */
+/** Id por defecto de la carta `k` (desde 1) de cada tipo, con la convención tipo + número: «lugar001». */
 export function cardIds(types: { label: string }[]): ((k: number) => string)[] {
-  return prefixes(types.map((t) => t.label)).map((p) => (k: number) => `${p}-${String(k).padStart(3, '0')}`);
-}
-
-/** Id corto de las cartas de un tipo: «Criatura» → «CRI». Distinto para cada tipo. */
-function prefixes(labels: string[]): string[] {
-  const used = new Set<string>();
-  return labels.map((label) => {
-    const base = (fileKey(label).replace(/-/g, '').toUpperCase() + 'XXX').slice(0, 3);
-    let p = base;
-    for (let n = 2; used.has(p); n++) p = base.slice(0, 2) + n;
-    used.add(p);
-    return p;
-  });
+  return types.map((t) => (k: number) => conventionalId(t.label, k));
 }
 
 function backTemplate(answers: WizardAnswers, f: number): Template {
@@ -292,7 +281,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
     if (art) files[`assets/${artPath(key)}`] = artSvg(art.rect.w, art.rect.h, palette, i * 47, `${t.label} · ilustración provisional`);
     const tpl: Template = { zones };
     if (a.backs !== 'none') {
-      const backId = a.backs === 'common' ? 'TRASERA' : `TRASERA-${prefixes(types.map((x) => x.label))[i]}`;
+      const backId = a.backs === 'common' ? 'trasera' : `trasera-${conventionalId(t.label, 1).replace(/\d+$/, '')}`;
       tpl.back = backId;
       backIds.set(key, backId);
     }
@@ -327,7 +316,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   fields.push('copias');
   if (a.backs === 'per-type') fields.push('color');
 
-  const pre = prefixes(types.map((t) => t.label));
+  const ids = cardIds(types);
   const total = types.reduce((s, t) => s + Math.min(MAX_ROWS_PER_TYPE, Math.max(0, Math.round(t.count))), 0);
   const width = String(total).length < 3 ? 3 : String(total).length;
   const rows: Record<string, string>[] = [];
@@ -343,7 +332,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       const own = (key: string) => (data[key] ?? '').trim();
       // Una carta sin nada escrito lleva habilidades de ejemplo; en cuanto se rellena, solo las marcadas.
       const untouched = !Object.entries(data).some(([key, v]) => !['id', 'ilustracion', 'copias'].includes(key) && v.trim());
-      const row: Record<string, string> = { id: own('id') || `${pre[i]}-${String(k).padStart(3, '0')}`, tipo: t.label.trim() };
+      const row: Record<string, string> = { id: own('id') || ids[i](k), tipo: t.label.trim() };
       for (const l of langs) {
         const ph = PLACEHOLDERS[l] ?? PLACEHOLDERS.es;
         row[col('titulo', l)] = own(col('titulo', l)) || `${t.label.trim()} ${k}`;
@@ -370,7 +359,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       rows.push(row);
     }
   });
-  if (a.backs === 'common') rows.push({ id: 'TRASERA', tipo: BACK_TEMPLATE, [col('titulo', langs[0])]: a.name.trim() });
+  if (a.backs === 'common') rows.push({ id: 'trasera', tipo: BACK_TEMPLATE, [col('titulo', langs[0])]: a.name.trim() });
   if (a.backs === 'per-type') {
     types.forEach((t, i) => {
       const row: Record<string, string> = { id: backIds.get(typeKey(t))!, tipo: BACK_TEMPLATE, color: shiftColor(palette.acento, i * 67, 0.28) };

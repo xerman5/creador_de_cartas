@@ -39,7 +39,7 @@ describe('fillCsv + importCsv', () => {
     const { types, report } = importCsv(a, csv);
     expect(report).toEqual({ byType: { Clan: 3, Lugar: 2 }, unknownTypes: [], ignored: [] });
     expect(types[0].cards![0]).toEqual({
-      id: 'CLA-001',
+      id: 'clan001',
       titulo: 'Lobos',
       descripcion: 'Aúllan.',
       coste: '2',
@@ -48,7 +48,7 @@ describe('fillCsv + importCsv', () => {
       ilustracion: 'lobos.png',
       copias: '3',
     });
-    expect(types[0].cards![1]).toEqual({ id: 'CLA-002' });
+    expect(types[0].cards![1]).toEqual({ id: 'clan002' });
     expect(types[1].count).toBe(2);
   });
 

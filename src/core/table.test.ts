@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { columnInfo, nextId, setAttribute } from './table';
+import { columnInfo, imagesByName, nextId, setAttribute } from './table';
 import type { Project } from './types';
 
 describe('tabla de cartas', () => {
@@ -12,7 +12,7 @@ describe('tabla de cartas', () => {
     ];
     expect(nextId(rows, 'criatura')).toBe('CRI-011');
     expect(nextId(rows, 'Hechizo')).toBe('HEC-2');
-    expect(nextId(rows, 'Lugar')).toBe('LUG-001');
+    expect(nextId(rows, 'Lugar')).toBe('lugar001');
   });
 
   it('pone, cambia y quita atributos de la celda sin tocar los demás', () => {
@@ -41,5 +41,19 @@ describe('tabla de cartas', () => {
     expect(info['descripcion-es']).toEqual({ long: true });
     expect(info.titulo).toEqual({});
     expect(info.atributos).toEqual({ attributes: true });
+  });
+});
+
+describe('imagesByName', () => {
+  it('por id o por tipo y número, solo en celdas vacías y sin repetir; dice qué cartas faltan', () => {
+    const rows = [
+      { id: 'lugar001', tipo: 'Lugar', ilustracion: '' },
+      { id: 'L-2', tipo: 'Lugar', ilustracion: '' },
+      { id: 'x', tipo: 'Lugar', ilustracion: 'ilustraciones/mia.png' },
+      { id: 'e1', tipo: 'Evento', ilustracion: '' },
+    ];
+    const r = imagesByName(rows, 'ilustracion', ['ilustraciones/lugar001.png', 'ilustraciones/Lugar-2.jpg', 'ilustraciones/lugar_3.png', 'ilustraciones/lugar-7.png', 'ilustraciones/otra.png']);
+    expect(Object.fromEntries(r.assigned)).toEqual({ 0: 'ilustraciones/lugar001.png', 1: 'ilustraciones/Lugar-2.jpg' });
+    expect(r.grow).toEqual([{ tipo: 'Lugar', have: 3, want: 7 }]);
   });
 });

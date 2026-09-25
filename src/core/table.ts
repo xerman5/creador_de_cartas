@@ -1,4 +1,5 @@
 import { parseAttributes, type AttributeValue } from './attributes';
+import { compactKey, conventionalId, parseNumbered } from './naming';
 import { normalizeKey } from './text';
 import type { CardRow, Project, Rect } from './types';
 
@@ -11,7 +12,8 @@ export function nextId(rows: CardRow[], tipo: string): string {
     const m = /^(.*?)(\d+)$/.exec(id);
     if (m && (!best || +m[2] > best.n)) best = { prefix: m[1], n: +m[2], width: m[2].length };
   }
-  const base = best ?? { prefix: `${(normalizeKey(tipo).replace(/[^a-z0-9]/g, '').toUpperCase() + 'XXX').slice(0, 3)}-`, n: 0, width: 3 };
+  // Sin cartas de ese tipo, la convención tipo + número: «lugar001».
+  const base = best ?? { prefix: conventionalId(tipo, 1).replace(/\d+$/, ''), n: 0, width: 3 };
   for (let n = base.n + 1; ; n++) {
     const id = `${base.prefix}${String(n).padStart(base.width, '0')}`;
     if (!ids.has(id)) return id;
@@ -65,4 +67,46 @@ export function columnInfo(project: Project, columns: string[]): Record<string, 
       else if (z.type === 'text' && z.rect.h >= 12) mark(z.bind, { long: true });
     }
   return out;
+}
+
+export interface ByName {
+  /** Fila → ruta de su imagen (dentro de assets/). */
+  assigned: Map<number, string>;
+  /** Tipos con imágenes numeradas más allá de sus cartas: cuántas tienen y cuántas harían falta. */
+  grow: { tipo: string; have: number; want: number }[];
+}
+
+/**
+ * Asigna imágenes a las cartas por su nombre: el id de la carta («lugar001.png») o el tipo y su
+ * número dentro del tipo, en el orden de la tabla («Lugar-3.jpg» → la tercera de Lugar).
+ * Solo en las celdas vacías de la columna de imagen.
+ */
+export function imagesByName(rows: CardRow[], column: string, paths: string[]): ByName {
+  const slug = (s: string) => compactKey(s);
+  const byStem = new Map(paths.map((p) => [slug((p.split('/').pop() ?? p).replace(/\.[^.]+$/, '')), p]));
+  const numbered = paths.map((p) => [p, parseNumbered(p)] as const).filter(([, n]) => n);
+  const assigned = new Map<number, string>();
+  const used = new Set(rows.map((r) => r[column]?.trim()).filter(Boolean));
+  const position = new Map<string, number>();
+  const count = new Map<string, { label: string; n: number }>();
+  rows.forEach((row, i) => {
+    const tipo = compactKey(row.tipo ?? '');
+    const pos = (position.get(tipo) ?? 0) + 1;
+    position.set(tipo, pos);
+    count.set(tipo, { label: row.tipo ?? '', n: pos });
+    if (row[column]?.trim()) return;
+    const byId = row.id?.trim() ? byStem.get(slug(row.id)) : undefined;
+    const byNum = numbered.find(([, n]) => n!.base === tipo && n!.n === pos)?.[0];
+    const path = [byId, byNum].find((p) => p && !used.has(p));
+    if (path) {
+      assigned.set(i, path);
+      used.add(path);
+    }
+  });
+  const grow: ByName['grow'] = [];
+  for (const [tipo, c] of count) {
+    const want = Math.max(0, ...numbered.filter(([, n]) => n!.base === tipo).map(([, n]) => n!.n));
+    if (want > c.n) grow.push({ tipo: c.label, have: c.n, want });
+  }
+  return { assigned, grow };
 }

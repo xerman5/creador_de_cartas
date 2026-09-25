@@ -1,5 +1,6 @@
 <script lang="ts">
   import { FONT_FILE, fontFamilyOf, RESOURCE_FILE, shelfOf, SHELVES, type ShelfId } from '../core/wizard/resources';
+  import { columnInfo, imagesByName, nextId } from '../core/table';
   import ResourceShelf from './ResourceShelf.svelte';
   import { thumbUrls } from './thumbs.svelte';
   import type { Workspace } from './workspace.svelte';
@@ -40,6 +41,47 @@
   async function add(files: File[], shelf: ShelfId) {
     const paths = await ws.addResources(files, shelf);
     report = paths.length ? `${paths.length} ${paths.length === 1 ? 'archivo añadido' : 'archivos añadidos'} a assets/${shelf}/.` : '';
+  }
+
+  // ---------------------------------------------------------- asignar por nombre
+
+  /** Columna de la tabla con la ilustración de cada carta (la primera que usa una zona de imagen). */
+  const imageColumn = $derived.by(() => {
+    const lp = ws.lp;
+    if (!lp) return '';
+    const info = columnInfo(lp.project, lp.columns);
+    return lp.columns.find((c) => c === 'ilustracion' && info[c]?.image) ?? lp.columns.find((c) => info[c]?.image) ?? '';
+  });
+  let growOffer = $state<{ tipo: string; have: number; want: number }[]>([]);
+
+  function assignByName() {
+    const lp = ws.lp;
+    if (!lp || !imageColumn) return;
+    const paths = images.filter((p) => shelfOf(p) === 'ilustraciones');
+    const r = imagesByName(lp.rows, imageColumn, paths);
+    if (r.assigned.size)
+      ws.updateRows((rows) => {
+        for (const [i, path] of r.assigned) rows[i] = { ...rows[i], [imageColumn]: path };
+      });
+    growOffer = r.grow;
+    report = r.assigned.size
+      ? `${r.assigned.size} ${r.assigned.size === 1 ? 'ilustración asignada' : 'ilustraciones asignadas'} por su nombre en la columna «${imageColumn}» (guarda para escribirlas en el CSV).`
+      : 'Ninguna ilustración nueva que asignar: los nombres no coinciden con ninguna carta sin imagen.';
+  }
+
+  /** Cartas nuevas para las imágenes numeradas que no tienen carta: «lugar012.png» con 10 lugares. */
+  function growRows(g: { tipo: string; have: number; want: number }) {
+    ws.updateRows((rows, columns) => {
+      let at = rows.map((r) => r.tipo).lastIndexOf(g.tipo) + 1;
+      for (let n = g.have; n < g.want; n++) {
+        const row = Object.fromEntries(columns.map((c) => [c, ''])) as Record<string, string>;
+        row.id = nextId(rows, g.tipo);
+        row.tipo = g.tipo;
+        rows.splice(at++, 0, row);
+      }
+    });
+    growOffer = growOffer.filter((x) => x !== g);
+    assignByName();
   }
 
   // ---------------------------------------------------------- fuentes
@@ -119,6 +161,21 @@
         onremove={writable ? remove : undefined}
         empty={writable ? 'Vacío: suelta aquí tus archivos.' : 'Vacío.'}
       />
+      {#if shelf.id === 'ilustraciones' && list.length && imageColumn}
+        <div class="row">
+          <button class="small" onclick={assignByName}>Asignar por nombre</button>
+          <span class="hint">
+            A cada carta sin ilustración, la que se llama como su id (<code>lugar001.png</code>) o como su tipo y su número
+            (<code>Lugar-3.jpg</code> es la tercera de Lugar).
+          </span>
+        </div>
+        {#each growOffer as g}
+          <p class="hint">
+            «{g.tipo}» tiene imágenes hasta la {g.want} y {g.have} cartas.
+            <button class="small" onclick={() => growRows(g)}>{g.want - g.have === 1 ? 'Crear la que falta' : `Crear las ${g.want - g.have} que faltan`}</button>
+          </p>
+        {/each}
+      {/if}
       {#if list.some((it) => !used.has(it.path))}
         <p class="hint">Sin usar: {list.filter((it) => !used.has(it.path)).map((it) => it.path.split('/').pop()).join(', ')}</p>
       {/if}
@@ -198,6 +255,12 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-top: 6px;
   }
   .fonts {
     display: flex;

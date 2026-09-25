@@ -47,7 +47,8 @@
   import TextControls from '../panels/TextControls.svelte';
   import { cardPixels } from '../../core/card';
   import { acceptsDrop, droppedEntries } from '../drop';
-  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, namingPlan, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { conventionalName, parseNumbered } from '../../core/naming';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
@@ -652,6 +653,60 @@
   let dropOver = $state(false);
 
   /** Imágenes o una carpeta soltadas: se suman a las que ya hay y se vuelve a emparejar. */
+  // ------------------------------------------------------------ convención tipo + número
+
+  /** Lo que dicen los nombres «lugar001.png» que aún no está en el asistente: cartas y tipos que faltan. */
+  const plan = $derived(
+    namingPlan(
+      [...imageMap.keys()],
+      answers.types.map((t) => t.label),
+      answers.types.map((t) => t.count),
+      MAX_ROWS_PER_TYPE,
+    ),
+  );
+  const planPending = $derived(plan.grow.length + plan.newTypes.length > 0);
+
+  function growType(type: number, count: number) {
+    if (answers.types[type]) answers.types[type].count = count;
+  }
+
+  /** Tipo nuevo a partir de los nombres; si solo hay un tipo sin nombre (el de partida), lo ocupa. */
+  function createType(label: string, count: number) {
+    const model = answers.types.find((t) => t.label.trim() && !t.sameAs);
+    const elements = [...new Set<ElementKey>(['art', ...(model?.elements ?? ['rules', 'number'])])];
+    if (answers.types.length === 1 && !answers.types[0].label.trim()) {
+      answers.types[0].label = label;
+      answers.types[0].count = count;
+      answers.types[0].elements = elements;
+    } else answers.types.push({ label, count, elements, attributes: model?.attributes ? [...model.attributes] : [] });
+  }
+
+  /** Imágenes con un tipo mal escrito («lugares003.png»): se renombran al tipo bueno («lugar003.png»). */
+  function renameTo(files: string[], label: string) {
+    const map = new Map(imageMap);
+    for (const f of files) {
+      const num = parseNumbered(f);
+      const blob = map.get(f);
+      if (!num || !blob) continue;
+      map.delete(f);
+      map.set(conventionalName(f, label, num.n), blob);
+    }
+    imageMap = map;
+  }
+
+  function applyPlan() {
+    for (const g of plan.grow) growType(g.type, g.count);
+    for (const t of plan.newTypes) {
+      if (t.suggestion) renameTo(t.files, t.suggestion);
+      else createType(t.label, t.count);
+    }
+    // Lo renombrado puede pedir más cartas en su tipo: una segunda vuelta.
+    queueMicrotask(() => {
+      for (const g of plan.grow) growType(g.type, g.count);
+      runMatch();
+    });
+  }
+
   async function dropImages(e: DragEvent) {
     dropOver = false;
     e.preventDefault();
@@ -854,6 +909,32 @@
   {/if}
 {/snippet}
 
+{#snippet namingPanel()}
+  {#if planPending}
+    <div class="report naming">
+      <b>Los nombres de tus imágenes dicen más:</b>
+      <ul>
+        {#each plan.grow as g}
+          <li>
+            «{g.label}» tiene imágenes hasta la {g.count} y {answers.types[g.type]?.count} cartas.
+            <button class="small" onclick={() => { growType(g.type, g.count); runMatch(); }}>Hacer {g.count} cartas</button>
+          </li>
+        {/each}
+        {#each plan.newTypes as t}
+          <li>
+            {t.files.length} {t.files.length === 1 ? 'imagen' : 'imágenes'} de «{t.label}» ({t.files[0]}{t.files.length > 1 ? '…' : ''}), que no es ningún tipo.
+            {#if t.suggestion}
+              <button class="small" onclick={() => { renameTo(t.files, t.suggestion!); runMatch(); }}>Son de «{t.suggestion}»</button>
+            {/if}
+            <button class="small" onclick={() => { createType(t.label, t.count); runMatch(); }}>Crear el tipo «{t.label}» con {t.count} {t.count === 1 ? 'carta' : 'cartas'}</button>
+          </li>
+        {/each}
+      </ul>
+      {#if plan.grow.length + plan.newTypes.length > 1}<button class="small primary" onclick={applyPlan}>Hacerlo todo</button>{/if}
+    </div>
+  {/if}
+{/snippet}
+
 {#snippet reviewPanel()}
   <div class="field review">
     <span>Repaso</span>
@@ -990,6 +1071,26 @@
       </table>
       <button class="small" onclick={addType}>＋ Añadir tipo</button>
       <p class="hint">La cantidad es aproximada: el asistente crea esas filas en la tabla para que solo tengas que rellenarlas.</p>
+      <div
+        class="row dropzone"
+        class:over={dropOver}
+        role="region"
+        aria-label="Crear los tipos desde las imágenes"
+        ondragover={(e) => {
+          if (acceptsDrop(e)) {
+            e.preventDefault();
+            dropOver = true;
+          }
+        }}
+        ondragleave={() => (dropOver = false)}
+        ondrop={dropImages}
+      >
+        <span class="hint">
+          ¿Tienes ya las ilustraciones con nombres como <code>lugar001.png</code>, <code>evento001.png</code>? Suelta aquí la carpeta (o
+          <button class="link" onclick={() => folderInput.click()}>elígela</button>) y los tipos y sus cartas salen de los nombres.
+        </span>
+      </div>
+      {@render namingPanel()}
     {:else if STEPS[step].id === 'contenido'}
       <h2>Qué lleva cada carta</h2>
       <p class="lead">Marca lo que tiene cada tipo. El título está siempre. La carta de la derecha cambia con cada respuesta.</p>
@@ -1508,7 +1609,12 @@
         <span>Elige la carpeta con tus imágenes</span>
         <p class="hint">Se emparejan solas con las cartas, en este orden:</p>
         <ol class="rules">
-          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'CRI-001'}.png</code></li>
+          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'criatura001'}.png</code></li>
+          <li>
+            El nombre es el <b>tipo y su número</b>: <code>{fileKeyOf(answers.types[0]?.label)}-3.png</code> es la tercera carta de «{previewLabel(
+              answers.types[0]?.label,
+            )}» (da igual mayúsculas, separadores o ceros: <code>Lugar_03.jpg</code>).
+          </li>
           <li>El nombre del archivo es el <b>título</b>: <code>guardian-de-ceniza.jpg</code> (sin importar mayúsculas, tildes ni espacios).</li>
           <li>
             <label class="check">
@@ -1537,9 +1643,10 @@
         </div>
         <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
       </div>
+      {@render namingPanel()}
       {#if match}
         <div class="report">
-          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.title} por título, {match.byRule.order} por orden.
+          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.name} por tipo y número, {match.byRule.title} por título, {match.byRule.order} por orden.
           {#if match.unused.length}<br />Sin usar ({match.unused.length}): {match.unused.slice(0, 8).join(', ')}{match.unused.length > 8 ? '…' : ''}{/if}
         </div>
       {/if}
@@ -1992,6 +2099,11 @@
     gap: 6px;
     align-items: center;
     margin-top: 8px;
+  }
+  .naming ul {
+    margin: 6px 0;
+    padding-left: 18px;
+    line-height: 1.9;
   }
   .issues {
     margin: 0;
