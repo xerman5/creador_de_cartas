@@ -70,11 +70,13 @@ export interface TypeSpec {
   clase?: string;
 }
 
-/** Abre el asistente y rellena nombre y tipos; deja el asistente en «Qué lleva cada carta». */
+/** Abre el asistente y rellena nombre y tipos (sin material); deja el asistente en «Qué lleva cada carta». */
 export async function startWizard(page: Page, name: string, types: TypeSpec[]) {
   await page.goto('/');
   await page.getByText('Crear con el asistente').click();
   await page.fill('#wz-name', name);
+  await next(page);
+  await expect(activeStep(page)).toContainText('Tu material');
   await next(page);
   const rows = page.locator('table.types tbody tr');
   for (const [i, t] of types.entries()) {
@@ -86,6 +88,9 @@ export async function startWizard(page: Page, name: string, types: TypeSpec[]) {
   await next(page);
   await expect(activeStep(page)).toContainText('Qué lleva cada carta');
 }
+
+/** Va a un paso ya visitado desde la lista de pasos. */
+export const goStep = (page: Page, title: string) => page.locator('.steps button', { hasText: title }).click();
 
 /** Marca elementos del tipo seleccionado (los que ya estén marcados se desmarcan). */
 export async function toggleElements(page: Page, labels: string[]) {

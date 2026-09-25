@@ -5,6 +5,11 @@ test('fuentes propias, trasera a medida y repaso final antes de crear', async ({
   const errors = trackErrors(page);
   await mockFolder(context, 'final');
   await startWizard(page, 'Bestias', [{ label: 'Criatura', count: 3 }]);
+
+  // Cartas (antes del diseño): un texto que no cabe, para el repaso.
+  await nextUntil(page, 'Cartas');
+  const heads = await page.locator('table.cards thead th').allTextContents();
+  await page.locator('table.cards tbody tr').nth(1).locator('td').nth(heads.indexOf('Reglas')).locator('textarea').fill('Muy largo. '.repeat(120));
   await nextUntil(page, 'Ajustes');
 
   // Fuentes propias: se suben y se eligen para los títulos.
@@ -25,10 +30,7 @@ test('fuentes propias, trasera a medida y repaso final antes de crear', async ({
   await page.getByRole('checkbox', { name: 'Borde' }).uncheck();
   await shot(page, 'trasera');
 
-  // Repaso: un texto que no cabe aparece con su carta, y el enlace lleva a ella.
-  await nextUntil(page, 'Cartas');
-  const heads = await page.locator('table.cards thead th').allTextContents();
-  await page.locator('table.cards tbody tr').nth(1).locator('td').nth(heads.indexOf('Reglas')).locator('textarea').fill('Muy largo. '.repeat(120));
+  // Repaso: el texto que no cabe aparece con su carta, y el enlace lleva a ella.
   await nextUntil(page, 'Crear');
   await expect(page.locator('.review')).toContainText('4 cartas revisadas');
   await expect(page.locator('.review .issues').first()).toContainText('criatura-002');

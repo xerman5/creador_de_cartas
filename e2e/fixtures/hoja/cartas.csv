@@ -1,0 +1,4 @@
+tipo;nombre;texto;ataque;volar
+Criatura;Lobo;Muerde;3;x
+Criatura;Cuervo;Vuela alto;1;
+Lugar;Torre oscura;;;

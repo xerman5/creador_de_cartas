@@ -10,13 +10,17 @@ test('clases y subclases desde los nombres, otra clase con los mismos tipos, y r
   await page.fill('#wz-name', 'Reinos');
   await next(page);
 
-  // Sin escribir ningún tipo: la carpeta de ilustraciones los crea, con su clase.
+  // «Tu material», antes que los tipos: la carpeta de ilustraciones los crea, con su clase.
+  await expect(page.locator('.steps button.active')).toContainText('Tu material');
   await page.locator('input[webkitdirectory]').last().setInputFiles(fixture('clases'));
   const panel = page.locator('.naming');
   await expect(panel).toContainText('Crear «Elfo · Ataque» con 2 cartas');
   await expect(panel).toContainText('Crear «Elfo · Recurso» con 1 carta');
   await expect(panel).toContainText('Crear «Orco · Ataque» con 1 carta');
   await panel.getByRole('button', { name: 'Hacerlo todo' }).click();
+  // Las cinco ilustraciones y la referencia, cada una a su carta.
+  await expect(page.locator('.report').first()).toContainText('6 imágenes: 5 en cartas · 1 referencia.');
+  await next(page);
   const rows = page.locator('table.types tbody tr');
   const types = () =>
     rows.evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('input')].map((i) => (i as HTMLInputElement).value).join(':')));
@@ -27,14 +31,8 @@ test('clases y subclases desde los nombres, otra clase con los mismos tipos, y r
   expect(await types()).toEqual(['Elfo:Ataque:2', 'Elfo:Lugar:1', 'Elfo:Recurso:1', 'Orco:Ataque:1', 'Enano:Ataque:2', 'Enano:Lugar:1', 'Enano:Recurso:1']);
   await shot(page, 'clases-tipos');
 
-  // Imágenes: las cinco ilustraciones y la referencia, cada una a su carta.
-  await nextUntil(page, 'Imágenes');
-  await expect(page.locator('.report').last()).toContainText('6 imágenes');
-  await expect(page.locator('.report').last()).toContainText('5 por tipo y número');
-  await expect(page.locator('.report').last()).toContainText('1 referencia');
-
   // En la tabla, la carta con referencia la enseña al lado.
-  await page.locator('.steps button', { hasText: 'Cartas' }).click();
+  await nextUntil(page, 'Cartas');
   await page.locator('.questions .tabs button', { hasText: 'Elfo · Recurso' }).click();
   await page.locator('table.cards tbody tr').first().click();
   await expect(page.locator('aside.preview figure.ref img')).toBeVisible();

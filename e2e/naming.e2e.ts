@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { fixture, mockFolder, next, nextUntil, readFolderFile, shot, trackErrors } from './helpers';
+import { fixture, goStep, mockFolder, next, nextUntil, readFolderFile, shot, trackErrors } from './helpers';
 
 test('convención tipo + número: los nombres de las imágenes crean tipos y cartas, y las asignan', async ({ page, context }) => {
   const errors = trackErrors(page);
@@ -7,6 +7,8 @@ test('convención tipo + número: los nombres de las imágenes crean tipos y car
   await page.goto('/');
   await page.getByText('Crear con el asistente').click();
   await page.fill('#wz-name', 'Aventura');
+  await next(page);
+  // Sin material todavía: los tipos a mano.
   await next(page);
 
   // Dos tipos escritos a mano…
@@ -17,7 +19,8 @@ test('convención tipo + número: los nombres de las imágenes crean tipos y car
   await rows.nth(1).locator('input[type=text]:not(.clase)').fill('Enemigo');
   await rows.nth(1).locator('input[type=number]').fill('1');
 
-  // …y la carpeta de ilustraciones: lugar001-003, evento-1/2, Enemgo_1 (mal escrito).
+  // …y, de vuelta en «Tu material», la carpeta de ilustraciones: lugar001-003, evento-1/2, Enemgo_1 (mal escrito).
+  await goStep(page, 'Tu material');
   await page.locator('input[webkitdirectory]').last().setInputFiles(fixture('convencion'));
   const panel = page.locator('.naming');
   await expect(panel).toContainText('«Lugar» tiene imágenes hasta la 3 y 2 cartas');
@@ -26,16 +29,18 @@ test('convención tipo + número: los nombres de las imágenes crean tipos y car
   await shot(page, 'convencion-tipos');
   await panel.getByRole('button', { name: 'Hacerlo todo' }).click();
   await expect(page.locator('.naming')).toHaveCount(0);
+  // Todas emparejadas: por id (enemigo-001, la renombrada) o por tipo y número (lugar001, evento-1).
+  await expect(page.locator('.report').first()).toContainText('6 imágenes: 6 en cartas.');
+  await goStep(page, 'Tipos de carta');
   const types = await rows.evaluateAll((trs) =>
     trs.map((tr) => [...tr.querySelectorAll('input:not(.clase)')].map((i) => (i as HTMLInputElement).value).join(':')),
   );
   expect(types).toEqual(['Lugar:3', 'Enemigo:1', 'Evento:2']);
 
-  // En «Imágenes», todas emparejadas: por id (enemigo-001, la renombrada) o por tipo y número (lugar001, evento-1).
-  await nextUntil(page, 'Imágenes');
-  await expect(page.locator('.report').last()).toContainText('6 imágenes: 1 por id, 5 por tipo y número, 0 por título, 0 por orden');
 
-  await nextUntil(page, 'Crear');
+  // Camino rápido: de la estructura, directo a crear con el diseño por defecto.
+  await page.getByRole('button', { name: 'Terminar ya ⇥' }).click();
+  await expect(page.locator('.steps button.active')).toContainText('Crear');
   await page.getByRole('button', { name: 'Guardar en una carpeta…' }).click();
   await expect(page.locator('.pending')).toBeVisible();
   const csv = (await readFolderFile(page, 'convencion', 'cartas.csv'))!;
