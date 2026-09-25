@@ -4,7 +4,7 @@ import type { Rect, Zone } from '../types';
 import { defaultAnswers, DESIGNS, type Adjust, type ElementKey } from './answers';
 import { layoutZones } from './designs';
 
-const ALL: ElementKey[] = ['art', 'subtitle', 'rules', 'flavor', 'cost', 'stats', 'variant', 'number'];
+const ALL: Exclude<ElementKey, 'title'>[] = ['art', 'subtitle', 'rules', 'flavor', 'cost', 'stats', 'variant', 'number'];
 const SIZES = [
   { width: 63, height: 88, safe: 3 },
   { width: 70, height: 120, safe: 3 },
@@ -27,7 +27,8 @@ function* combos() {
         for (const attrSide of SIDES)
           for (const costCorner of CORNERS)
             for (const art of [0.3, 0.75])
-              yield { design, elements, size, adjust: { ...defaultAnswers().adjust, attrSide, costCorner, art } };
+              // Sin título, en la mitad de los casos: su sitio se reparte y nada se pisa.
+              yield { design, elements, size, title: (mask + (art === 0.3 ? 0 : 1)) % 2 === 0, adjust: { ...defaultAnswers().adjust, attrSide, costCorner, art } };
   }
 }
 
@@ -41,14 +42,14 @@ describe('layoutZones: todas las combinaciones', () => {
       const statKeys = ['ataque', 'defensa', 'vida', 'velocidad'].slice(0, n % 5);
       const abilityKeys = ['volar', 'veneno', 'sigilo'].slice(0, (n >> 1) % 4);
       const zones = layoutZones({ ...c, tipo: 'criatura', statKeys, abilityKeys, variantColumn: 'rareza' });
-      const where = `${c.design} ${c.size.width}×${c.size.height} [${[...c.elements].join(',')}] ${c.adjust.attrSide}/${c.adjust.costCorner}/${c.adjust.art} ${statKeys.length}+${abilityKeys.length}`;
+      const where = `${c.design} ${c.size.width}×${c.size.height} [${c.title ? 'title,' : ''}${[...c.elements].join(',')}] ${c.adjust.attrSide}/${c.adjust.costCorner}/${c.adjust.art} ${statKeys.length}+${abilityKeys.length}`;
       const f = Math.min(c.size.width / 63, c.size.height / 88);
 
       for (const i of safeAreaIssues({ zones }, c.size)) problems.push(`${where}: ${i.message}`);
 
       const ids = zones.map((z) => z.id);
       if (new Set(ids).size !== ids.length) problems.push(`${where}: ids repetidos ${ids}`);
-      if (!zones.some((z) => z.id === 'titulo')) problems.push(`${where}: sin título`);
+      if (zones.some((z) => z.id === 'titulo') !== c.title) problems.push(`${where}: ${c.title ? 'sin título' : 'con título'}`);
 
       for (const z of zones) {
         const r = z.rect;
@@ -78,7 +79,7 @@ describe('layoutZones: todas las combinaciones', () => {
   });
 
   it('cada elemento pedido aparece y los no pedidos no', () => {
-    const expected: Record<ElementKey, string> = {
+    const expected: Record<Exclude<ElementKey, 'title'>, string> = {
       art: 'ilustracion',
       subtitle: 'linea de tipo',
       rules: 'reglas',
@@ -103,6 +104,30 @@ describe('layoutZones: todas las combinaciones', () => {
         expect(ids, `${design}/${el}`).toContain(expected[el]);
         for (const other of ALL.filter((o) => o !== el)) expect(ids, `${design}/${el}`).not.toContain(expected[other]);
       }
+    }
+  });
+
+  it('sin título, su banda o placa desaparece y la ilustración sube', () => {
+    for (const design of DESIGNS.map((d) => d.id)) {
+      const layout = (title: boolean) =>
+        layoutZones({
+          design,
+          elements: new Set<ElementKey>(['art', 'rules']),
+          size: SIZES[0],
+          adjust: defaultAnswers().adjust,
+          tipo: 't',
+          statKeys: [],
+          variantColumn: 'rareza',
+          title,
+        });
+      const without = layout(false);
+      const ids = without.map((z) => z.id);
+      expect(ids, design).not.toContain('titulo');
+      expect(ids, design).not.toContain('cabecera');
+      expect(ids, design).not.toContain('placa');
+      const art = (zones: Zone[]) => zones.find((z) => z.id === 'ilustracion')!.rect;
+      // La ilustración a sangre (completa) no cambia; en los demás, gana alto.
+      if (design !== 'completa') expect(art(without).h, design).toBeGreaterThan(art(layout(true)).h);
     }
   });
 

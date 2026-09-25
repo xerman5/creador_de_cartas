@@ -35,8 +35,17 @@ test('tu material primero: una hoja de cálculo, imágenes a lo bruto y la bande
     .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('input:not(.clase)')].map((i) => (i as HTMLInputElement).value).join(':')));
   expect(types).toEqual(['Criatura:2', 'Lugar:3']);
 
+  // Paso 4: los lugares no llevan título dibujado (la carta sigue teniendo nombre en la tabla).
+  await next(page);
+  await page.locator('.questions .tabs button', { hasText: 'Lugar' }).click();
+  const title = page.locator('.element', { has: page.locator('b', { hasText: /^Título$/ }) });
+  await expect(title).toHaveClass(/active/);
+  await title.click();
+  await expect(title).not.toHaveClass(/active/);
+
   // En la tabla, la imagen que queda se pone en una carta desde la bandeja.
   await nextUntil(page, 'Cartas');
+  await page.locator('.questions .tabs button', { hasText: 'Criatura' }).click();
   await expect(page.locator('table.cards tbody tr').first().locator('input[type=checkbox]')).toBeChecked();
   await page.locator('table.cards tbody tr').nth(1).click();
   await page.locator('.tray .thumb', { hasText: 'IMG_3000.png' }).click();
@@ -51,6 +60,10 @@ test('tu material primero: una hoja de cálculo, imágenes a lo bruto y la bande
   expect(csv).toMatch(/^criatura-002,Criatura,Cuervo,.*ilustraciones\/IMG_3000\.png/m);
   expect(csv).toMatch(/^lugar-001,Lugar,Torre oscura,.*ilustraciones\/torre-oscura\.png/m);
   expect(csv).toMatch(/^lugar-003,Lugar,.*ilustraciones\/lugares\/IMG_2042\.png/m);
+  const project = JSON.parse((await readFolderFile(page, 'material', 'proyecto.json'))!);
+  const ids = (t: string) => project.templates[t].zones.map((z: { id: string }) => z.id);
+  expect(ids('criatura')).toContain('titulo');
+  expect(ids('lugar')).not.toContain('titulo');
 
   expect(errors).toEqual([]);
 });

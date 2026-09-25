@@ -54,6 +54,7 @@ export function fineFor(answers: WizardAnswers, t: TypeAnswer | undefined, scope
 
 /** Qué elemento del asistente («Qué lleva cada carta») es cada paso del recorrido. */
 export const ELEMENT_OF: Record<string, ElementKey | undefined> = {
+  titulo: 'title',
   ilustracion: 'art',
   linea: 'subtitle',
   reglas: 'rules',

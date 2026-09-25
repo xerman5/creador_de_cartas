@@ -271,6 +271,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
           statKeys: r.stats,
           abilityKeys: r.abilities,
           variantColumn: variantCol,
+          title: r.elements.has('title'),
         }),
         fine,
         f,

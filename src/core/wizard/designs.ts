@@ -14,6 +14,8 @@ export interface LayoutInput {
   abilityKeys?: string[];
   /** Columna del CSV con la rareza o facción. */
   variantColumn: string;
+  /** Con título (por defecto, sí). Sin él, su banda o placa desaparece y deja el sitio al resto. */
+  title?: boolean;
 }
 
 /** Ruta (dentro de assets/) de la ilustración provisional de un tipo. */
@@ -79,7 +81,8 @@ class Layout {
     this.iw = this.x1 - this.x0;
     this.radius = inp.adjust.rounded ? 1.8 * this.f : 0;
     // «stats» es la lista de números; las habilidades van aparte.
-    this.has = (e) => (e === 'stats' ? inp.elements.has('stats') && inp.statKeys.length > 0 : inp.elements.has(e));
+    this.has = (e) =>
+      e === 'title' ? inp.title !== false : e === 'stats' ? inp.elements.has('stats') && inp.statKeys.length > 0 : inp.elements.has(e);
     this.hasAb = inp.elements.has('stats') && (inp.abilityKeys?.length ?? 0) > 0;
     this.abH = 6.5 * this.f;
     const fonts = fontStackOf(inp.adjust);
@@ -325,10 +328,13 @@ class Layout {
 
     let y = y0;
     const hH = 8.5 * f;
-    this.shape('cabecera', box(x0, y, iw, hH), 'papel');
-    const t = this.corners(y, hH);
-    this.title(box(t.l, y, t.r - t.l, hH), 'tinta');
-    y += hH + g;
+    // Sin título, la cabecera solo queda si lleva coste o rareza.
+    if (this.has('title') || this.has('cost') || this.has('variant')) {
+      this.shape('cabecera', box(x0, y, iw, hH), 'papel');
+      const t = this.corners(y, hH);
+      if (this.has('title')) this.title(box(t.l, y, t.r - t.l, hH), 'tinta');
+      y += hH + g;
+    }
 
     let yb = y1;
     if (this.has('number')) {
@@ -393,10 +399,13 @@ class Layout {
     else this.background('principal');
 
     const hH = 8.5 * f;
-    this.shape('cabecera', box(x0, y0, iw, hH), 'tinta', { opacity: 0.72 });
-    const t = this.corners(y0, hH);
-    this.title(box(t.l, y0, t.r - t.l, hH), 'papel');
-    const top = y0 + hH + g;
+    let top = y0;
+    if (this.has('title') || this.has('cost') || this.has('variant')) {
+      this.shape('cabecera', box(x0, y0, iw, hH), 'tinta', { opacity: 0.72 });
+      const t = this.corners(y0, hH);
+      if (this.has('title')) this.title(box(t.l, y0, t.r - t.l, hH), 'papel');
+      top = y0 + hH + g;
+    }
 
     const hasText = this.has('rules') || this.has('flavor');
     const subH = 5 * f;
@@ -462,15 +471,17 @@ class Layout {
     const row = this.has('stats') && !side;
     const hasText = this.has('rules') || this.has('flavor');
     const abRow = this.hasAb && !this.has('art');
+    // La placa lleva el título; sin él, solo queda (sin ilustración) para el coste y la rareza.
+    const plate = this.has('title') || (!this.has('art') && (this.has('cost') || this.has('variant')));
 
     let yb = y1;
     if (this.has('number')) {
       this.number(box(x0, yb - 2.6 * f, iw, 2.6 * f), 'papel');
       yb -= 3.2 * f;
     }
-    const fixed = plateH + g + (this.has('subtitle') ? subH + g : 0) + (row ? rowH + g : 0) + (abRow ? this.abH + g : 0);
+    const fixed = (plate ? plateH + g : 0) + (this.has('subtitle') ? subH + g : 0) + (row ? rowH + g : 0) + (abRow ? this.abH + g : 0);
     const avail = yb - y0 - fixed;
-    const { artH } = this.split(avail + g, a.art, hasText);
+    const { artH } = this.split(plate ? avail + g : avail, a.art, hasText);
 
     let y = y0;
     if (this.has('art')) {
@@ -484,7 +495,7 @@ class Layout {
       if (this.has('variant')) this.gem(gemLeft ? cx0 + 1.4 * f : cx1 - 1.4 * f - gd, y + 1.4 * f, gd);
       if (this.hasAb) {
         // Encima de la placa; si llegan a la altura del coste y la marca, se apartan de esas esquinas.
-        const bottom = y + artH - plateH * 0.45 - 0.8 * f;
+        const bottom = plate ? y + artH - plateH * 0.45 - 0.8 * f : y + artH - 0.8 * f;
         const low = bottom - this.abH > y + 0.9 * f + cs + 0.3 * f;
         let xa = cx0 + f;
         let xb = cx1 - f;
@@ -496,15 +507,18 @@ class Layout {
         }
         this.abilitiesOnArt(box(cx0, y, cx1 - cx0, artH), xa, xb, 'center', bottom);
       }
-      y += artH - plateH * 0.45;
-      this.shape('placa', box(cx0 + f, y, cx1 - cx0 - 2 * f, plateH), 'papel', { stroke: 'acento', strokeWidth: r2(0.4 * f) });
-      this.title(box(cx0 + 2 * f, y, cx1 - cx0 - 4 * f, plateH), 'tinta');
-    } else {
+      if (plate) {
+        y += artH - plateH * 0.45;
+        this.shape('placa', box(cx0 + f, y, cx1 - cx0 - 2 * f, plateH), 'papel', { stroke: 'acento', strokeWidth: r2(0.4 * f) });
+        this.title(box(cx0 + 2 * f, y, cx1 - cx0 - 4 * f, plateH), 'tinta');
+        y += plateH + g;
+      } else y += artH + g;
+    } else if (plate) {
       this.shape('placa', box(cx0, y, cx1 - cx0, plateH), 'papel', { stroke: 'acento', strokeWidth: r2(0.4 * f) });
       const t = this.corners(y, plateH, cx0, cx1);
-      this.title(box(t.l, y, t.r - t.l, plateH), 'tinta');
+      if (this.has('title')) this.title(box(t.l, y, t.r - t.l, plateH), 'tinta');
+      y += plateH + g;
     }
-    y += plateH + g;
     if (side) {
       const col = box(side === 'left' ? x0 : x1 - cw, y0, cw, y - g - y0);
       this.shape('fondo atributos', col, 'tinta', { opacity: 0.45 });
@@ -545,9 +559,11 @@ class Layout {
       if (this.has('subtitle')) this.subtitle(box(t.l, y, t.r - t.l, h), 'principal', 'center');
       y += h + g;
     }
-    const titleH = 13 * f;
-    this.title(box(ix0, y, iw, titleH), 'principal', 13);
-    y += titleH + g;
+    if (this.has('title')) {
+      const titleH = 13 * f;
+      this.title(box(ix0, y, iw, titleH), 'principal', 13);
+      y += titleH + g;
+    }
 
     if (this.has('number')) {
       this.number(box(ix0, yb - 2.6 * f, iw, 2.6 * f), 'principal');
