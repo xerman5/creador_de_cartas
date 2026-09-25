@@ -1,4 +1,4 @@
-import { capitalize, compactKey, nearest, parseNumbered, typeMatchKey } from '../naming';
+import { capitalize, nearest, parseNumbered, typeMatchKey } from '../naming';
 import { fileKey, typeLabel } from './answers';
 
 export const IMAGE_FILE = /\.(png|jpe?g|webp|gif|svg)$/i;
@@ -94,6 +94,9 @@ export function matchImages(cards: CardRef[], paths: string[], types: TypeName[]
   return { assigned, unused: available, byRule };
 }
 
+/** Palabras de enlace: un nombre con ellas es una frase («carta de evento»), no clase + tipo. */
+const CONNECTORS = /^(de|del|la|las|el|los|lo|y|e|o|u|a|al|en|con|sin|por|para|of|the|and)$/i;
+
 export interface NamingPlan {
   /** Tipos con imágenes numeradas más allá de sus cartas: cuántas cartas tendría que tener. */
   grow: { type: number; label: string; count: number }[];
@@ -105,10 +108,9 @@ export interface NamingPlan {
  * Lo que dicen los nombres con la convención clase + tipo + número que aún no está en el asistente:
  * cartas que faltan en un tipo y tipos que no existen. Solo propone; no cambia nada.
  *
- * En un nombre de varias palabras, la primera es la clase si ya es una clase del juego o si los
- * archivos lo dejan claro (la misma primera palabra con otros tipos, u otra primera palabra con el
- * mismo tipo): «elfos-ataque», «elfos-lugares», «orcos-ataque» → clases Elfo y Orco. Si no, todas
- * las palabras son el nombre del tipo («carta-de-evento»).
+ * En un nombre de varias palabras, la primera es la clase (el grupo) y el resto el tipo (el subgrupo):
+ * «clan-energy-1» → clase Clan, tipo Energy; después «clan-militar-1» va a la misma clase. Si el nombre es
+ * una frase («carta-de-evento», con «de», «la», «y»…), todas sus palabras son el nombre del tipo.
  */
 export function namingPlan(paths: string[], types: TypeName[], counts: number[], max = Infinity): NamingPlan {
   const typeKeys = types.map((t) => typeMatchKey(t.clase, t.label));
@@ -120,13 +122,7 @@ export function namingPlan(paths: string[], types: TypeName[], counts: number[],
     .filter((x): x is { path: string; num: NonNullable<ReturnType<typeof parseNumbered>> } => !!x.num);
 
   const unknown = parsed.filter((x) => !typeKeys.includes(x.num.key));
-  const first = (w: string[]) => compactKey(w[0]);
-  const rest = (w: string[]) => compactKey(w.slice(1).join(''));
-  const isClase = (w: string[]) =>
-    w.length >= 2 &&
-    (knownClases.has(first(w)) ||
-      unknown.some((o) => first(o.num.words) === first(w) && rest(o.num.words) !== rest(w)) ||
-      unknown.some((o) => o.num.words.length >= 2 && first(o.num.words) !== first(w) && rest(o.num.words) === rest(w)));
+  const isClase = (w: string[]) => w.length >= 2 && (knownClases.has(typeMatchKey(w[0])) || !w.some((x) => CONNECTORS.test(x)));
   const nice = (words: string[]) => capitalize(words.join(' ').toLowerCase());
 
   const plan: NamingPlan = { grow: [], newTypes: [] };

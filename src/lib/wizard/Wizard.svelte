@@ -706,11 +706,14 @@
   const inCards = $derived([...imageMap.keys()].filter((p) => usedImages.has(`${IMAGES_DIR}/${p}`)).length);
   const refCount = $derived([...imageMap.keys()].filter((p) => usedImages.has(`${REFS_DIR}/${p}`)).length);
 
-  /** Lo que se trae: imágenes (a la lista de la carpeta) y, si hay, la primera hoja de cálculo. */
-  async function ingest(list: { path: string; file: File }[], replace: boolean) {
+  /**
+   * Lo que se trae: imágenes y, si hay, la primera hoja de cálculo. Se suma a lo que ya había (se puede traer
+   * el material en varias tandas: «clan-energy-…» hoy, «clan-militar-…» mañana).
+   */
+  async function ingest(list: { path: string; file: File }[]) {
     const sheet = list.find((d) => /\.csv$/i.test(d.path));
     if (sheet) await importFile(sheet.file, false);
-    const map = new Map(replace ? [] : imageMap);
+    const map = new Map(imageMap);
     for (const d of list) if (IMAGE_FILE.test(d.path)) map.set(d.path, d.file);
     imageMap = map;
     runMatch();
@@ -721,12 +724,11 @@
     // Rutas relativas a la carpeta elegida: «criatura/01.png».
     ingest(
       Array.from(list).map((file) => ({ path: (file.webkitRelativePath || file.name).split('/').slice(1).join('/') || file.name, file })),
-      true,
     );
   }
 
   function pickFiles(list: FileList | null) {
-    if (list?.length) ingest(Array.from(list).map((file) => ({ path: file.name, file })), false);
+    if (list?.length) ingest(Array.from(list).map((file) => ({ path: file.name, file })));
   }
 
   let dropOver = $state(false);
@@ -817,7 +819,6 @@
     const strip = tops.size === 1 && !tops.has('');
     ingest(
       list.map((d) => ({ path: strip ? d.path.split('/').slice(1).join('/') : d.path, file: d.file })),
-      false,
     );
   }
 

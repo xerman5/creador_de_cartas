@@ -62,3 +62,29 @@ test('clases y subclases desde los nombres, otra clase con los mismos tipos, y r
 
   expect(errors).toEqual([]);
 });
+
+test('grupo y subgrupo desde «clan-energy-N», y otro subgrupo del mismo grupo en una segunda tanda', async ({ page }) => {
+  const errors = trackErrors(page);
+  await page.goto('/');
+  await page.getByText('Crear con el asistente').click();
+  await next(page);
+  const folder = page.locator('input[webkitdirectory]').last();
+  const panel = page.locator('.naming');
+
+  await folder.setInputFiles(fixture('grupos', 'tanda1'));
+  await expect(panel).toContainText('Crear «Clan · Energy» con 3 cartas');
+  await panel.getByRole('button', { name: 'Crear «Clan · Energy» con 3 cartas' }).click();
+
+  // Otra carpeta después: se suma a la primera y va al mismo grupo.
+  await folder.setInputFiles(fixture('grupos', 'tanda2'));
+  await expect(panel).toContainText('Crear «Clan · Militar» con 1 carta');
+  await panel.getByRole('button', { name: 'Crear «Clan · Militar» con 1 carta' }).click();
+  await expect(page.locator('.report').first()).toContainText('4 imágenes: 4 en cartas.');
+
+  await next(page);
+  const types = await page
+    .locator('table.types tbody tr')
+    .evaluateAll((trs) => trs.map((tr) => [...tr.querySelectorAll('input')].map((i) => (i as HTMLInputElement).value).join(':')));
+  expect(types).toEqual(['Clan:Energy:3', 'Clan:Militar:1']);
+  expect(errors).toEqual([]);
+});

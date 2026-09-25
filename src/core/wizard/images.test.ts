@@ -104,6 +104,16 @@ describe('convención clase + tipo + número', () => {
     expect(namingPlan(['clan900.png'], types, [3, 2], 500).grow[0].count).toBe(500);
   });
 
+  it('«clan-energy-1…12»: grupo Clan, subgrupo Energy; después «clan-militar-1» va al mismo grupo', () => {
+    const files = Array.from({ length: 12 }, (_, i) => `clan-energy-${i + 1}.png`);
+    const plan = namingPlan(files, [{ label: '' }], [20]);
+    expect(plan.newTypes.map(({ clase, label, count }) => ({ clase, label, count }))).toEqual([{ clase: 'Clan', label: 'Energy', count: 12 }]);
+    const later = namingPlan(['clan-militar-1.png'], [{ clase: 'Clan', label: 'Energy' }], [12]);
+    expect(later.newTypes[0]).toMatchObject({ clase: 'Clan', label: 'Militar', count: 1 });
+    // Tres palabras sin enlaces: la primera es el grupo y el resto, el subgrupo.
+    expect(namingPlan(['elfos-magia-oscura-2.png'], [], []).newTypes[0]).toMatchObject({ clase: 'Elfo', label: 'Magia oscura' });
+  });
+
   it('una clase ya conocida se reconoce aunque solo haya un tipo nuevo', () => {
     const plan = namingPlan(['orcos-magia-001.png'], [{ clase: 'Orco', label: 'Ataque' }], [1]);
     expect(plan.newTypes[0]).toMatchObject({ clase: 'Orco', label: 'Magia', count: 1 });
