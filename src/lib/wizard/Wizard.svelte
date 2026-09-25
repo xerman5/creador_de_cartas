@@ -17,7 +17,9 @@
     flagOn,
     FONT_PAIRS,
     fontStack,
+    fullName,
     isAbility,
+    typeLabel,
     PALETTES,
     resolvedType,
     textKey,
@@ -47,7 +49,8 @@
   import TextControls from '../panels/TextControls.svelte';
   import { cardPixels } from '../../core/card';
   import { acceptsDrop, droppedEntries } from '../drop';
-  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, namingPlan, REFS_DIR, type CardRef, type MatchResult } from '../../core/wizard/images';
+  import { conventionalId, conventionalName, parseNumbered } from '../../core/naming';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
@@ -61,6 +64,7 @@
     parseProgress,
     previewLabel,
     previewProject,
+    previewType,
     progressJson,
     rowOfType,
     saveDraft,
@@ -124,7 +128,7 @@
   let error = $state('');
 
   const currentType = $derived(answers.types[Math.min(current, answers.types.length - 1)]);
-  const labels = $derived(answers.types.map((t) => t.label.trim()));
+  const labels = $derived(answers.types.map(typeLabel));
   const resolved = $derived(answers.types.map((t) => resolvedType(answers, t)));
   // Lo marcado decide qué se pregunta: si no, marcar «Atributos» sin elegir ninguno escondería la pregunta.
   const uses = (e: ElementKey) => resolved.some((r) => r.declared.has(e));
@@ -194,8 +198,8 @@
     }
     if (id === 'tipos') {
       if (!answers.types.length) out.push('Añade al menos un tipo de carta.');
-      const keys = labels.map(normalizeKey);
-      if (keys.some((k) => !k)) out.push('Cada tipo necesita un nombre.');
+      const keys = answers.types.map(typeKey);
+      if (answers.types.some((t) => !t.label.trim())) out.push('Cada tipo necesita un nombre.');
       else if (new Set(keys).size !== keys.length) out.push('Hay dos tipos con el mismo nombre.');
       if (keys.includes('trasera')) out.push('«Trasera» está reservado para los dorsos: usa otro nombre.');
       if (answers.types.some((t) => !(t.count >= 1 && t.count <= MAX_ROWS_PER_TYPE)))
@@ -208,7 +212,7 @@
       if (keys.includes('coste')) out.push('«Coste» ya existe como elemento propio: usa otro nombre.');
       answers.types.forEach((t, i) => {
         if (!t.sameAs && t.elements.includes('stats') && !resolved[i].attributes.length)
-          out.push(`«${t.label}» lleva atributos pero no has elegido cuáles.`);
+          out.push(`«${typeLabel(t)}» lleva atributos pero no has elegido cuáles.`);
       });
       if (uses('variant') && !answers.variant.values.some((v) => v.name.trim())) out.push('Define al menos un valor de rareza o facción.');
     }
@@ -239,12 +243,25 @@
 
   function addType() {
     let n = answers.types.length + 1;
-    while (labels.map(normalizeKey).includes(`tipo ${n}`)) n++;
+    while (answers.types.map(typeKey).includes(`tipo ${n}`)) n++;
     answers.types.push({ label: `Tipo ${n}`, count: 10, elements: ['art', 'rules', 'number'], attributes: [] });
   }
 
+  /** Clases escritas hasta ahora, en orden de aparición. */
+  const clases = $derived([...new Set(answers.types.map((t) => t.clase?.trim()).filter((c): c is string => !!c))]);
+
+  /** Una clase nueva con los mismos tipos que la primera: «Orco» con Ataque, Recurso y Lugar como «Elfo». */
+  function copyClase() {
+    const from = clases[0];
+    const name = prompt(`Nombre de la nueva clase (tendrá los mismos tipos que «${from}»):`)?.trim();
+    if (!name) return;
+    if (clases.some((c) => normalizeKey(c) === normalizeKey(name))) return alert(`Ya hay una clase «${name}».`);
+    for (const t of answers.types.filter((x) => x.clase?.trim() === from))
+      answers.types.push({ clase: name, label: t.label, count: t.count, elements: [...t.elements], attributes: [...t.attributes] });
+  }
+
   function removeType(i: number) {
-    const gone = normalizeKey(answers.types[i].label);
+    const gone = typeKey(answers.types[i]);
     answers.types.splice(i, 1);
     for (const t of answers.types) if (t.sameAs && normalizeKey(t.sameAs) === gone) t.sameAs = undefined;
     current = Math.min(current, answers.types.length - 1);
@@ -486,7 +503,7 @@
 
   // ------------------------------------------------------------ recorrido tipo a tipo
 
-  const tplZones = $derived(preview?.project.templates[typeKey({ label: previewLabel(currentType?.label) })]?.zones ?? []);
+  const tplZones = $derived(preview?.project.templates[typeKey(previewType(currentType))]?.zones ?? []);
   const tour = $derived(tourElements(tplZones));
   /** Elemento del recorrido; puede pasarse del final (volviendo hacia atrás) y se ajusta al dibujar. */
   let tourEl = $state(0);
@@ -561,12 +578,12 @@
 
   /** Lo que se usará si la celda se queda vacía. */
   function placeholder(c: TableColumn, k: number): string {
-    const label = previewLabel(currentType?.label);
+    const label = fullName(previewType(currentType));
     const ph = PLACEHOLDERS[tableLang] ?? PLACEHOLDERS.es;
     const base = c.key.replace(/-[a-z]{2}$/, '');
     if (c.key === 'id') return ids[current]?.(k + 1) ?? '';
     if (base === 'titulo') return `${label} ${k + 1}`;
-    if (base === 'subtipo') return label;
+    if (base === 'subtipo') return typeLabel(previewType(currentType));
     if (base === 'descripcion') return ph.rules;
     if (base === 'sabor') return ph.flavor;
     if (c.kind === 'image') return 'provisional';
@@ -626,16 +643,24 @@
     );
   }
 
+  /** Empareja ilustraciones y referencias («(ref)») con las cartas y rellena sus columnas. */
   function runMatch() {
-    const result = matchImages(cardRefs(), [...imageMap.keys()], answers.types.map((t) => t.label), byOrder);
+    const refs = cardRefs();
+    const paths = [...imageMap.keys()];
+    const result = matchImages(refs, paths, answers.types, byOrder);
+    const refResult = matchImages(refs, paths, answers.types, false, true);
     answers.types.forEach((t, type) => {
       for (let index = 0; index < t.count; index++) {
         const path = result.assigned.get(cardRefKey(type, index));
         if (path) setCell(t, index, 'ilustracion', `${IMAGES_DIR}/${path}`);
+        const ref = refResult.assigned.get(cardRefKey(type, index));
+        if (ref) setCell(t, index, 'referencia', `${REFS_DIR}/${ref}`);
       }
     });
     match = result;
+    refCount = refResult.assigned.size;
   }
+  let refCount = $state(0);
 
   function pickFolder(list: FileList | null) {
     if (!list?.length) return;
@@ -651,7 +676,82 @@
 
   let dropOver = $state(false);
 
-  /** Imágenes o una carpeta soltadas: se suman a las que ya hay y se vuelve a emparejar. */
+  // ------------------------------------------------------------ referencias
+
+  /**
+   * Referencia que se enseña al lado de la carta: la de la carta seleccionada (tabla, imágenes) o, en el
+   * resto de pasos, la primera que tenga su tipo.
+   */
+  const refPath = $derived.by(() => {
+    const t = currentType;
+    if (!t) return '';
+    const own = (k: number) => {
+      const v = cell(t, k, 'referencia');
+      return v.startsWith(`${REFS_DIR}/`) ? v.slice(REFS_DIR.length + 1) : '';
+    };
+    if (focus) return own(row);
+    for (let k = 0; k < t.count; k++) if (own(k) && imageMap.has(own(k))) return own(k);
+    return '';
+  });
+  let refUrl = $state('');
+  $effect(() => {
+    const blob = refPath ? imageMap.get(refPath) : undefined;
+    if (!blob) return void (refUrl = '');
+    const url = URL.createObjectURL(blob);
+    refUrl = url;
+    return () => URL.revokeObjectURL(url);
+  });
+
+  // ------------------------------------------------------------ convención clase + tipo + número
+
+  /** Lo que dicen los nombres («elfos-ataque-001.png») que aún no está en el asistente: cartas y tipos que faltan. */
+  const plan = $derived(namingPlan([...imageMap.keys()], answers.types, answers.types.map((t) => t.count), MAX_ROWS_PER_TYPE));
+  const planPending = $derived(plan.grow.length + plan.newTypes.length > 0);
+
+  function growType(type: number, count: number) {
+    if (answers.types[type]) answers.types[type].count = count;
+  }
+
+  /**
+   * Tipo nuevo a partir de los nombres. Copia lo que lleva un tipo de la misma subclase (otra clase)
+   * o, si no, el primero; si solo hay un tipo sin nombre (el de partida), lo ocupa.
+   */
+  function createType(label: string, count: number, clase?: string) {
+    const named = answers.types.filter((t) => t.label.trim() && !t.sameAs);
+    const model = named.find((t) => normalizeKey(t.label) === normalizeKey(label)) ?? named[0];
+    const elements = [...new Set<ElementKey>(['art', ...(model?.elements ?? ['rules', 'number'])])];
+    const attributes = model?.attributes ? [...model.attributes] : [];
+    if (answers.types.length === 1 && !answers.types[0].label.trim()) Object.assign(answers.types[0], { label, clase, count, elements, attributes });
+    else answers.types.push({ label, clase, count, elements, attributes });
+  }
+
+  /** Imágenes con un nombre mal escrito («lugres003.png»): se renombran al del tipo bueno («lugar-003.png»). */
+  function renameTo(files: string[], type: { label: string; clase?: string }) {
+    const map = new Map(imageMap);
+    for (const f of files) {
+      const num = parseNumbered(f);
+      const blob = map.get(f);
+      if (!num || !blob) continue;
+      map.delete(f);
+      map.set(conventionalName(f, [type.clase, type.label], num.n, num.ref), blob);
+    }
+    imageMap = map;
+  }
+
+  function applyPlan() {
+    for (const g of plan.grow) growType(g.type, g.count);
+    for (const t of plan.newTypes) {
+      const target = t.suggestion !== undefined ? answers.types[t.suggestion] : undefined;
+      if (target) renameTo(t.files, target);
+      else createType(t.label, t.count, t.clase);
+    }
+    // Lo renombrado puede pedir más cartas en su tipo: una segunda vuelta.
+    queueMicrotask(() => {
+      for (const g of plan.grow) growType(g.type, g.count);
+      runMatch();
+    });
+  }
+
   async function dropImages(e: DragEvent) {
     dropOver = false;
     e.preventDefault();
@@ -681,7 +781,7 @@
     answers.types.map((t) => {
       let own = 0;
       for (let k = 0; k < t.count; k++) if (cell(t, k, 'ilustracion')) own++;
-      return { label: t.label, own, total: t.count };
+      return { label: typeLabel(t), own, total: t.count };
     }),
   );
 
@@ -696,15 +796,29 @@
   });
 
   /** El proyecto completo: archivos generados más las imágenes elegidas que usa alguna carta. */
+  /**
+   * Imágenes de la carpeta que usa alguna carta, cada una a su carpeta del proyecto: las ilustraciones a
+   * assets/ilustraciones/ y las referencias a assets/referencias/.
+   */
+  function usedFiles(map: Map<string, Blob>, snap: WizardAnswers): Record<string, Blob> {
+    const out: Record<string, Blob> = {};
+    for (const t of snap.types)
+      for (const c of t.cards ?? [])
+        for (const [col, dir] of [['ilustracion', IMAGES_DIR], ['referencia', REFS_DIR]] as const) {
+          const v = c[col] ?? '';
+          const blob = v.startsWith(`${dir}/`) ? map.get(v.slice(dir.length + 1)) : undefined;
+          if (blob) out[`assets/${v}`] = blob;
+        }
+    return out;
+  }
+
   function files(): Record<string, string | Blob> {
     const snap = $state.snapshot(answers) as WizardAnswers;
-    const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
-    const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
     const built = buildProject(snap);
     return {
       ...projectFiles(built),
       ...resourceFiles(resources),
-      ...imageFiles(images),
+      ...usedFiles(imageMap, snap),
       // Con él, el proyecto se puede retomar después en el asistente.
       [WIZARD_FILE]: newWizardFile(built, snap, 'crear'),
     };
@@ -770,7 +884,7 @@
   function freshFiles(): Record<string, Blob> {
     const res = new Map([...resources].filter(([p, b]) => start?.resources.get(p) !== b));
     const img = new Map([...imageMap].filter(([p, b]) => start?.images.get(p) !== b));
-    return { ...resourceFiles(res), ...imageFiles(img) };
+    return { ...resourceFiles(res), ...usedFiles(img, $state.snapshot(answers) as WizardAnswers) };
   }
 
   /** Guarda las respuestas en la carpeta sin tocar el proyecto: se seguirá desde aquí. */
@@ -845,12 +959,39 @@
   }
 </script>
 
-{#snippet card(lp: LoadedProject | null | undefined, label: string, o: RenderOptions, back = false, index = 0)}
-  {@const r = back ? backRow(lp ?? null, label) : rowOfType(lp ?? null, label, index)}
+{#snippet card(lp: LoadedProject | null | undefined, t: TypeAnswer | undefined, o: RenderOptions, back = false, index = 0)}
+  {@const r = back ? backRow(lp ?? null, t) : rowOfType(lp ?? null, t, index)}
   {#if lp && r}
     <CardView row={r} {lp} opts={{ ...o, lang: (stepId === 'cartas' && tableLang) || lp.langs[0] || '' }} />
   {:else}
     <div class="placeholder">Dibujando…</div>
+  {/if}
+{/snippet}
+
+{#snippet namingPanel()}
+  {#if planPending}
+    <div class="report naming">
+      <b>Los nombres de tus imágenes dicen más:</b>
+      <ul>
+        {#each plan.grow as g}
+          <li>
+            «{g.label}» tiene imágenes hasta la {g.count} y {answers.types[g.type]?.count} cartas.
+            <button class="small" onclick={() => { growType(g.type, g.count); runMatch(); }}>Hacer {g.count} cartas</button>
+          </li>
+        {/each}
+        {#each plan.newTypes as t}
+          {@const name = typeLabel(t)}
+          <li>
+            {t.files.length} {t.files.length === 1 ? 'imagen' : 'imágenes'} de «{name}» ({t.files[0]}{t.files.length > 1 ? '…' : ''}), que no es ningún tipo.
+            {#if t.suggestion !== undefined && answers.types[t.suggestion]}
+              <button class="small" onclick={() => { renameTo(t.files, answers.types[t.suggestion!]); runMatch(); }}>Son de «{typeLabel(answers.types[t.suggestion])}»</button>
+            {/if}
+            <button class="small" onclick={() => { createType(t.label, t.count, t.clase); runMatch(); }}>Crear «{name}» con {t.count} {t.count === 1 ? 'carta' : 'cartas'}</button>
+          </li>
+        {/each}
+      </ul>
+      {#if plan.grow.length + plan.newTypes.length > 1}<button class="small primary" onclick={applyPlan}>Hacerlo todo</button>{/if}
+    </div>
   {/if}
 {/snippet}
 
@@ -887,11 +1028,20 @@
   </div>
 {/snippet}
 
+{#snippet reference()}
+  {#if refUrl}
+    <figure class="ref">
+      <img src={refUrl} alt="Referencia" />
+      <figcaption>Referencia</figcaption>
+    </figure>
+  {/if}
+{/snippet}
+
 {#snippet typeTabs()}
   {#if answers.types.length > 1}
     <div class="tabs">
       {#each answers.types as t, i}
-        <button class:active={i === current} onclick={() => (current = i)}>{t.label || `Tipo ${i + 1}`}</button>
+        <button class:active={i === current} onclick={() => (current = i)}>{typeLabel(t) || `Tipo ${i + 1}`}</button>
       {/each}
     </div>
   {/if}
@@ -974,11 +1124,17 @@
         Un tipo es un formato de carta con su propio diseño: <i>Criatura</i>, <i>Hechizo</i>, <i>Recurso</i>… ¿Cuántos tiene tu juego y
         cuántas cartas de cada uno?
       </p>
+      <p class="hint">
+        Si tu juego tiene <b>clases</b> (elfos, orcos, un clan…), escribe también la clase de cada tipo: «Elfo» + «Ataque» es un tipo con
+        su propia maqueta, y sus cartas se numeran aparte (<code>elfo-ataque-001</code>). Sin clases, deja esa columna vacía.
+      </p>
+      <datalist id="wz-clases">{#each clases as c}<option value={c}></option>{/each}</datalist>
       <table class="types">
-        <thead><tr><th>Nombre</th><th>Cartas</th><th></th></tr></thead>
+        <thead><tr><th>Clase <small>(opcional)</small></th><th>Tipo o subclase</th><th>Cartas</th><th></th></tr></thead>
         <tbody>
           {#each answers.types as t, i}
             <tr>
+              <td><input type="text" class="clase" list="wz-clases" bind:value={t.clase} placeholder="—" aria-label="Clase del tipo {i + 1}" /></td>
               <td><input type="text" bind:value={t.label} placeholder={i === 0 ? 'p. ej. Criatura' : 'p. ej. Hechizo'} /></td>
               <td><input type="number" min="1" max={MAX_ROWS_PER_TYPE} bind:value={t.count} /></td>
               <td>
@@ -988,8 +1144,35 @@
           {/each}
         </tbody>
       </table>
-      <button class="small" onclick={addType}>＋ Añadir tipo</button>
+      <div class="row">
+        <button class="small" onclick={addType}>＋ Añadir tipo</button>
+        {#if clases.length}
+          <button class="small" onclick={copyClase} title="Crea los mismos tipos (con sus elementos y atributos) para una clase nueva">
+            ＋ Otra clase con los mismos tipos
+          </button>
+        {/if}
+      </div>
       <p class="hint">La cantidad es aproximada: el asistente crea esas filas en la tabla para que solo tengas que rellenarlas.</p>
+      <div
+        class="row dropzone"
+        class:over={dropOver}
+        role="region"
+        aria-label="Crear los tipos desde las imágenes"
+        ondragover={(e) => {
+          if (acceptsDrop(e)) {
+            e.preventDefault();
+            dropOver = true;
+          }
+        }}
+        ondragleave={() => (dropOver = false)}
+        ondrop={dropImages}
+      >
+        <span class="hint">
+          ¿Tienes ya las ilustraciones con nombres como <code>lugar001.png</code>, <code>evento001.png</code>? Suelta aquí la carpeta (o
+          <button class="link" onclick={() => folderInput.click()}>elígela</button>) y los tipos y sus cartas salen de los nombres.
+        </span>
+      </div>
+      {@render namingPanel()}
     {:else if STEPS[step].id === 'contenido'}
       <h2>Qué lleva cada carta</h2>
       <p class="lead">Marca lo que tiene cada tipo. El título está siempre. La carta de la derecha cambia con cada respuesta.</p>
@@ -1004,12 +1187,12 @@
               onchange={(e) => (currentType.sameAs = e.currentTarget.value || undefined)}
             >
               <option value="">No, tiene su propio contenido</option>
-              {#each others as o}<option value={o.label}>Igual que «{o.label}»</option>{/each}
+              {#each others as o}<option value={fullName(o)}>Igual que «{typeLabel(o)}»</option>{/each}
             </select>
           </label>
         {/if}
         {#if currentType.sameAs}
-          <p class="hint">«{currentType.label}» usará los mismos elementos y atributos que «{currentType.sameAs}», con su propia plantilla.</p>
+          <p class="hint">«{typeLabel(currentType)}» usará los mismos elementos y atributos que «{currentType.sameAs}», con su propia plantilla.</p>
         {:else}
           <div class="elements">
             {#each ELEMENTS as el}
@@ -1092,14 +1275,14 @@
                 <tbody>
                   {#each statTypes as t}
                     <tr>
-                      <th>{t.label || 'Sin nombre'}</th>
+                      <th>{typeLabel(t) || 'Sin nombre'}</th>
                       {#each named as at}
                         <td>
                           <input
                             type="checkbox"
                             checked={t.attributes.includes(attrKey(at))}
                             onchange={() => toggleAttr(t, attrKey(at))}
-                            aria-label="{at.label} en {t.label}"
+                            aria-label="{at.label} en {typeLabel(t)}"
                           />
                         </td>
                       {/each}
@@ -1201,7 +1384,7 @@
       <div class="designs">
         {#each DESIGNS as d}
           <button class="design" class:active={answers.design === d.id} onclick={() => (answers.design = d.id)}>
-            {@render card(designPreviews[d.id], currentType?.label ?? '', small)}
+            {@render card(designPreviews[d.id], currentType, small)}
             <b>{d.label}</b>
             <small>{d.hint}</small>
           </button>
@@ -1508,7 +1691,13 @@
         <span>Elige la carpeta con tus imágenes</span>
         <p class="hint">Se emparejan solas con las cartas, en este orden:</p>
         <ol class="rules">
-          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'CRI-001'}.png</code></li>
+          <li>El nombre del archivo es el <b>id</b> de la carta: <code>{ids[0]?.(1) ?? 'criatura001'}.png</code></li>
+          <li>
+            El nombre es la <b>clase, el tipo y el número</b>: <code>{conventionalId([answers.types[0]?.clase, previewLabel(answers.types[0]?.label)], 3)}.png</code>
+            es la tercera carta de «{typeLabel(previewType(answers.types[0]))}» (da igual mayúsculas, plurales, separadores o ceros:
+            <code>Elfos_Ataques_3.jpg</code>). Con <code>(ref)</code> al final (<code>elfos-ataque-003(ref).png</code>) es una
+            <b>referencia</b>: un boceto que verás al lado de la carta mientras la diseñas.
+          </li>
           <li>El nombre del archivo es el <b>título</b>: <code>guardian-de-ceniza.jpg</code> (sin importar mayúsculas, tildes ni espacios).</li>
           <li>
             <label class="check">
@@ -1537,9 +1726,10 @@
         </div>
         <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
       </div>
+      {@render namingPanel()}
       {#if match}
         <div class="report">
-          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.title} por título, {match.byRule.order} por orden.
+          {imageMap.size} imágenes: {match.byRule.id} por id, {match.byRule.name} por tipo y número, {match.byRule.title} por título, {match.byRule.order} por orden{refCount ? ` · ${refCount} ${refCount === 1 ? 'referencia' : 'referencias'}` : ''}.
           {#if match.unused.length}<br />Sin usar ({match.unused.length}): {match.unused.slice(0, 8).join(', ')}{match.unused.length > 8 ? '…' : ''}{/if}
         </div>
       {/if}
@@ -1643,20 +1833,23 @@
   <aside class="preview">
     {#if STEPS[step].id === 'traseras'}
       {#if answers.backs !== 'none'}
-        {@render card(preview, currentType?.label ?? '', opts, true)}
+        {@render card(preview, currentType, opts, true)}
         <small>Trasera</small>
       {:else}
         <p class="hint">Sin trasera.</p>
       {/if}
     {:else if STEPS[step].id === 'diseno'}
-      {@render card(designPreviews[answers.design], currentType?.label ?? '', opts)}
-      <small>{DESIGNS.find((d) => d.id === answers.design)?.label} · {previewLabel(currentType?.label)}</small>
+      {@render card(designPreviews[answers.design], currentType, opts)}
+      <small>{DESIGNS.find((d) => d.id === answers.design)?.label} · {typeLabel(previewType(currentType))}</small>
     {:else if focus}
       {@render typeTabs()}
-      {@render card(preview, currentType?.label ?? '', opts, false, row)}
+      <div class="pair" class:with-ref={!!refUrl}>
+        {@render card(preview, currentType, opts, false, row)}
+        {@render reference()}
+      </div>
       <div class="stepper">
         <button class="small" onclick={() => (row = Math.max(0, row - 1))} disabled={row === 0}>◀</button>
-        <small>{previewLabel(currentType?.label)} · carta {row + 1} de {currentType?.count}</small>
+        <small>{typeLabel(previewType(currentType))} · carta {row + 1} de {currentType?.count}</small>
         <button class="small" onclick={() => (row = Math.min((currentType?.count ?? 1) - 1, row + 1))} disabled={row >= (currentType?.count ?? 1) - 1}>▶</button>
       </div>
       {#if cropImage && currentType}
@@ -1674,8 +1867,11 @@
       {/if}
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
-      {@render card(preview, currentType?.label ?? '', stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
-      <small>{previewLabel(currentType?.label)} · vista previa</small>
+      <div class="pair" class:with-ref={!!refUrl}>
+        {@render card(preview, currentType, stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
+        {@render reference()}
+      </div>
+      <small>{typeLabel(previewType(currentType))} · vista previa</small>
     {/if}
   </aside>
 </div>
@@ -1986,12 +2182,55 @@
   .warn {
     color: var(--warn);
   }
+  .pair {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    justify-content: center;
+    width: 100%;
+  }
+  .pair.with-ref > :global(*) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .pair.with-ref :global(canvas) {
+    width: 100% !important;
+    height: auto !important;
+  }
+  .ref {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .ref img {
+    max-width: 100%;
+    border-radius: 6px;
+    outline: 1px dashed var(--border);
+  }
+  .ref figcaption {
+    font-size: 11px;
+    color: var(--muted);
+  }
   .crop-panel {
     display: flex;
     flex-direction: column;
     gap: 6px;
     align-items: center;
     margin-top: 8px;
+  }
+  table.types input.clase {
+    width: 120px;
+  }
+  table.types th small {
+    font-weight: normal;
+    color: var(--muted);
+  }
+  .naming ul {
+    margin: 6px 0;
+    padding-left: 18px;
+    line-height: 1.9;
   }
   .issues {
     margin: 0;

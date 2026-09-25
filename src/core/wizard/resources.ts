@@ -9,6 +9,7 @@ export const SHELVES = [
   { id: 'iconos', label: 'Iconos', hint: 'Atributos, habilidades, coste: PNG con transparencia o SVG.' },
   { id: 'fondos', label: 'Fondos', hint: 'Fondos y marcos de carta: del tamaño de la carta con sangrado.' },
   { id: 'ilustraciones', label: 'Ilustraciones', hint: 'El arte de cada carta.' },
+  { id: 'referencias', label: 'Referencias', hint: 'Bocetos o imágenes de ayuda («…(ref).png»): se ven al lado de la carta mientras la diseñas, nunca en ella.' },
 ] as const;
 export type ShelfId = (typeof SHELVES)[number]['id'];
 

@@ -48,9 +48,9 @@ describe('buildProject', () => {
     const { lp } = await load(rich());
     const ids = lp.rows.map((r) => r.id);
     expect(new Set(ids).size).toBe(ids.length);
-    expect(ids.slice(0, 2)).toEqual(['CRI-001', 'CRI-002']);
-    expect(ids).toContain('HEC-001');
-    expect(ids).toContain('CR2-001');
+    expect(ids.slice(0, 2)).toEqual(['criatura-001', 'criatura-002']);
+    expect(ids).toContain('hechizo-001');
+    expect(ids).toContain('criatura-epica-001');
     const first = lp.rows[0];
     expect(first['titulo-es']).toBe('Criatura 1');
     expect(first['descripcion-en']).toBe('Write the rules text here. {ataque}');
@@ -102,7 +102,7 @@ describe('datos de cartas y ajuste fino', () => {
     const [dragon, lobo, tercera] = lp.rows;
     expect(dragon).toMatchObject({ id: 'DRAGON', titulo: 'Dragón', descripcion: 'Vuela.', rareza: 'Épica', ilustracion: 'ilustraciones/dragon.png', copias: '2' });
     expect(dragon.atributos).toMatch(/^coste:4 \| ataque:7 \| vida:\d$/);
-    expect(lobo).toMatchObject({ id: 'CRI-002', titulo: 'Lobo', descripcion: 'Escribe aquí el texto de reglas.', ilustracion: '' });
+    expect(lobo).toMatchObject({ id: 'criatura-002', titulo: 'Lobo', descripcion: 'Escribe aquí el texto de reglas.', ilustracion: '' });
     expect(tercera.titulo).toBe('Criatura 3');
   });
 

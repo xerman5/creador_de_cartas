@@ -3,7 +3,7 @@ import { parseCsv } from '../csv';
 import type { LoadedProject } from '../project';
 import { normalizeKey } from '../text';
 import type { Project } from '../types';
-import { attrKey, withDefaults, type WizardAnswers } from './answers';
+import { attrKey, fullName, withDefaults, type WizardAnswers } from './answers';
 import { BACK_TEMPLATE, PROVISIONAL_DIR, type BuiltProject } from './build';
 import { importCsv } from './table';
 
@@ -213,7 +213,7 @@ export function applyAll(
   keep: Set<string>,
 ): { project: Project; csv: string; wizard: string } {
   const project = applyProject(lp.project, built.project, g, keep);
-  const csv = mergeCsv(built.csv, currentCsv, answers.types.map((t) => t.label));
+  const csv = mergeCsv(built.csv, currentCsv, answers.types.map(fullName));
   // Las huellas son las de lo generado: lo que se conservó a mano seguirá contando como retocado.
   const generated = fingerprint({ ...project, templates: built.project.templates, attributes: built.project.attributes }, csv);
   return { project, csv, wizard: wizardFileJson({ answers, step, generated }) };

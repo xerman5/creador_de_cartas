@@ -7,6 +7,7 @@
   import { RESOURCE_FILE } from '../core/wizard/resources';
   import CardView from './CardView.svelte';
   import CropEditor from './CropEditor.svelte';
+  import RefImage from './RefImage.svelte';
   import type { Workspace } from './workspace.svelte';
 
   /** La tabla de cartas (el CSV) editable, con la carta seleccionada dibujada al lado. */
@@ -49,6 +50,9 @@
       const row: CardRow = Object.fromEntries(columns.map((c) => [c, '']));
       row.id = nextId(rows, tipo);
       row.tipo = tipo;
+      // Con clases, la carta nueva es de la misma clase y subclase que las de su tipo.
+      const model = rows.find((r) => r.tipo === tipo);
+      for (const c of ['clase', 'subclase']) if (columns.includes(c) && model?.[c]) row[c] = model[c];
       rows.splice(at, 0, row);
     });
     selected = at;
@@ -174,7 +178,10 @@
 
   <aside>
     {#if current && selected !== null}
-      <CardView row={current} {lp} {opts} />
+      <div class="pair">
+        <CardView row={current} {lp} {opts} />
+        <RefImage {lp} row={current} width={130} />
+      </div>
       <p class="meta">{current.id || `Fila ${selected + 1}`} · {current.tipo}</p>
 
       {#if Object.keys(lp.project.attributes).length}
@@ -319,6 +326,12 @@
   }
   td.dup input {
     outline: 1px solid #e05252;
+  }
+  .pair {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    justify-content: center;
   }
   .meta {
     text-align: center;

@@ -55,7 +55,7 @@ test('retomar el asistente: trae lo cambiado fuera, respeta los retoques y conse
   expect(zone('hechizo', 'titulo').align).toBe('left');
   const rows = (await readFolderFile(page, 'retomar', 'cartas.csv'))!.trimEnd().split('\n');
   expect(rows[0]).toMatch(/,notas$/);
-  expect(rows.find((r) => r.startsWith('CRI-001'))).toMatch(/Lobo.*,revisar$/);
+  expect(rows.find((r) => r.startsWith('criatura-001'))).toMatch(/Lobo.*,revisar$/);
 
   // Volver otra vez sin haber cambiado nada fuera: no hay nada que traer.
   await page.getByRole('button', { name: 'Asistente', exact: true }).click();

@@ -10,7 +10,7 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
 
   // Una ilustración propia para la primera carta (por su id) y su encuadre.
   await page.locator('input[webkitdirectory]').last().setInputFiles(fixture('ilustraciones'));
-  await expect(page.locator('.report').first()).toContainText('1 por id');
+  await expect(page.locator('.report').first()).toContainText('1 por tipo y número');
   await page.locator('.steps button', { hasText: 'Cartas' }).click();
   await page.locator('table.cards tbody tr').first().click();
   const zoom = page.getByLabel('Encuadre de la ilustración: ampliación');
@@ -21,7 +21,7 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
   await nextUntil(page, 'Crear');
   await page.getByRole('button', { name: 'Guardar en una carpeta…' }).click();
   await expect(page.locator('.pending')).toBeVisible();
-  expect(await readFolderFile(page, 'tabla', 'cartas.csv')).toContain('ilustraciones/CRI-001.png,50% 50% 2');
+  expect(await readFolderFile(page, 'tabla', 'cartas.csv')).toContain('ilustraciones/Criatura-1.png,50% 50% 2');
 
   // Tabla: editar un título, añadir, duplicar y quitar cartas; deshacer.
   await page.getByRole('button', { name: '4 · Tabla' }).click();
@@ -31,9 +31,9 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
   await rows.first().click();
   await page.getByRole('button', { name: '＋ Carta' }).click();
   await expect(rows).toHaveCount(5);
-  await expect(page.getByLabel('id, fila 2')).toHaveValue('CRI-004');
+  await expect(page.getByLabel('id, fila 2')).toHaveValue('criatura-004');
   await page.getByRole('button', { name: 'Duplicar' }).click();
-  await expect(page.getByLabel('id, fila 3')).toHaveValue('CRI-005');
+  await expect(page.getByLabel('id, fila 3')).toHaveValue('criatura-005');
   page.once('dialog', (d) => d.accept());
   await page.getByRole('button', { name: 'Quitar' }).click();
   await expect(rows).toHaveCount(5);
@@ -63,7 +63,7 @@ test('encuadre en el asistente y tabla de cartas en el editor, con deshacer y gu
   await expect.poll(async () => (await readFolderFile(page, 'tabla', 'cartas.csv')) ?? '').toContain('Lobo');
   const csv = (await readFolderFile(page, 'tabla', 'cartas.csv'))!;
   expect(csv.split('\n')[0]).toBe('id,tipo,titulo,descripcion,sabor,atributos,ilustracion,encuadre,numero,copias');
-  expect(csv).toMatch(/CRI-001,Criatura,Lobo,.*ataque:9/);
+  expect(csv).toMatch(/criatura-001,Criatura,Lobo,.*ataque:9/);
 
   expect(errors).toEqual([]);
 });

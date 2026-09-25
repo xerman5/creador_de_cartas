@@ -2,7 +2,7 @@ import type { FileSource } from '../../core/assets';
 import { readText } from '../../core/text';
 import type { Project } from '../../core/types';
 import type { WizardAnswers } from '../../core/wizard/answers';
-import { IMAGES_DIR } from '../../core/wizard/images';
+import { IMAGES_DIR, REFS_DIR } from '../../core/wizard/images';
 import { FONT_FILE, RESOURCE_FILE, shelfOf, type Resources } from '../../core/wizard/resources';
 import { parseWizardFile, resumeAnswers, WIZARD_FILE, type WizardFile } from '../../core/wizard/sync';
 
@@ -19,7 +19,7 @@ export interface ResumeContext {
   notes: string[];
   /** Iconos y fondos de assets/. */
   resources: Resources;
-  /** Ilustraciones de assets/ilustraciones/ (ruta dentro de esa carpeta). */
+  /** Ilustraciones y referencias de assets/ilustraciones/ y assets/referencias/ (ruta dentro de su carpeta). */
   images: Map<string, Blob>;
   /** Entrar directamente al recorrido, en ese tipo y en el elemento que contiene esa zona. */
   jump?: { type: string; zone: string };
@@ -42,7 +42,9 @@ export async function loadResume(source: FileSource, project: Project): Promise<
     if (!shelf) continue;
     const data = await source.read(`${project.assetsDir}/${path}`);
     if (!data) continue;
+    // Ilustraciones y referencias van con las imágenes de la carpeta (rutas relativas a su carpeta).
     if (shelf === 'ilustraciones') images.set(path.slice(IMAGES_DIR.length + 1), data);
+    else if (shelf === 'referencias') images.set(path.slice(REFS_DIR.length + 1), data);
     else resources.set(path, data);
   }
   return { source, project, csv, file, answers, notes, resources, images };

@@ -7,6 +7,7 @@
   import Stage from './Stage.svelte';
   import ZoneProps from './ZoneProps.svelte';
   import SimpleZone from './panels/SimpleZone.svelte';
+  import RefImage from './RefImage.svelte';
   import type { Workspace } from './workspace.svelte';
 
   let {
@@ -327,6 +328,7 @@
               tool = null;
             }}
             bind:selected={selectedRaw} onwarnings={(w) => (renderWarnings = w)} />
+          <RefImage {lp} row={previewRow} width={Math.round(pxPerMm * size.width * 0.8)} />
         </div>
       </div>
 
@@ -608,8 +610,10 @@
     min-width: 100%;
     min-height: 100%;
     width: max-content;
-    display: grid;
-    place-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
     padding: 24px;
     box-sizing: border-box;
   }

@@ -2,7 +2,7 @@ import { MemorySource } from '../../core/assets';
 import { loadProject, type LoadedProject } from '../../core/project';
 import { normalizeKey } from '../../core/text';
 import type { CardRow } from '../../core/types';
-import { withDefaults, type DesignId, type WizardAnswers } from '../../core/wizard/answers';
+import { fullName, typeLabel, withDefaults, type DesignId, type TypeAnswer, type WizardAnswers } from '../../core/wizard/answers';
 import { BACK_TEMPLATE, buildProject, projectFiles } from '../../core/wizard/build';
 import { IMAGES_DIR } from '../../core/wizard/images';
 import { PROGRESS_FORMAT } from '../../core/wizard/sync';
@@ -41,15 +41,19 @@ export async function previewProject(answers: WizardAnswers, o: PreviewOptions =
 /** Un tipo aún sin nombre se enseña como «Carta» en la vista previa. */
 export const previewLabel = (label: string | undefined) => label?.trim() || 'Carta';
 
-export function rowOfType(lp: LoadedProject | null, label: string, index = 0): CardRow | undefined {
-  const key = normalizeKey(previewLabel(label));
+/** Tipo tal como sale en la vista previa: sin nombre, «Carta». */
+export const previewType = (t: Pick<TypeAnswer, 'label' | 'clase'> | undefined) => ({ clase: t?.clase, label: previewLabel(t?.label) });
+
+export function rowOfType(lp: LoadedProject | null, t: Pick<TypeAnswer, 'label' | 'clase'> | undefined, index = 0): CardRow | undefined {
+  const key = normalizeKey(fullName(previewType(t)));
   const rows = lp?.rows.filter((r) => normalizeKey(r.tipo ?? '') === key) ?? [];
   return rows[Math.min(index, rows.length - 1)];
 }
 
-export function backRow(lp: LoadedProject | null, label?: string): CardRow | undefined {
+export function backRow(lp: LoadedProject | null, t?: Pick<TypeAnswer, 'label' | 'clase'>): CardRow | undefined {
   const backs = lp?.rows.filter((r) => normalizeKey(r.tipo ?? '') === BACK_TEMPLATE) ?? [];
-  return (label && backs.find((r) => normalizeKey(r.subtipo ?? r['subtipo-es'] ?? '') === normalizeKey(label))) || backs[0];
+  const label = t ? normalizeKey(typeLabel(previewType(t))) : '';
+  return (label && backs.find((r) => normalizeKey(r.subtipo ?? r['subtipo-es'] ?? '') === label)) || backs[0];
 }
 
 const DRAFT_KEY = 'creador-de-cartas/asistente';
