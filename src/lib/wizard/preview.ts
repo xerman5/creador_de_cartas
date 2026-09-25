@@ -5,6 +5,7 @@ import type { CardRow } from '../../core/types';
 import { withDefaults, type DesignId, type WizardAnswers } from '../../core/wizard/answers';
 import { BACK_TEMPLATE, buildProject, projectFiles } from '../../core/wizard/build';
 import { IMAGES_DIR } from '../../core/wizard/images';
+import { PROGRESS_FORMAT } from '../../core/wizard/sync';
 import { decodeResources, encodeResources, resourceFiles, type Resources } from '../../core/wizard/resources';
 
 export interface PreviewOptions {
@@ -52,7 +53,7 @@ export function backRow(lp: LoadedProject | null, label?: string): CardRow | und
 }
 
 const DRAFT_KEY = 'creador-de-cartas/asistente';
-export const PROGRESS_FORMAT = 'creador-de-cartas/asistente';
+export { PROGRESS_FORMAT };
 
 export interface Progress {
   answers: WizardAnswers;

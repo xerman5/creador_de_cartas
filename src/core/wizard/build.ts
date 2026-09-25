@@ -6,6 +6,7 @@ import {
   fileKey,
   flagOn,
   FONT_PAIRS,
+  fontStack,
   mergeFine,
   resolvedType,
   textKey,
@@ -103,7 +104,7 @@ function backTemplate(answers: WizardAnswers, f: number): Template {
       valign: 'middle',
       padding: r2(2 * f),
       minSize: r2(7 * f),
-      font: { family: 'Georgia, serif', size: r2(16 * f), weight: 'bold', color: 'principal' },
+      font: { family: fontStack(answers).title, size: r2(16 * f), weight: 'bold', color: 'principal' },
       rect: { x: r2(m), y: r2(y), w: r2(W - 2 * m), h: r2(bandH * (answers.backs === 'per-type' ? 0.66 : 1)) },
     },
   ];
@@ -114,11 +115,16 @@ function backTemplate(answers: WizardAnswers, f: number): Template {
       bind: 'subtipo',
       align: 'center',
       valign: 'top',
-      font: { family: 'Georgia, serif', size: r2(8 * f), color: 'tinta', style: 'italic' },
+      font: { family: fontStack(answers).body, size: r2(8 * f), color: 'tinta', style: 'italic' },
       rect: { x: r2(m), y: r2(y + bandH * 0.6), w: r2(W - 2 * m), h: r2(bandH * 0.36) },
     });
   }
-  return { zones };
+  // Ajustes del paso «Traseras»: otro dibujo, la banda y los textos.
+  const back = answers.backFine;
+  const out = applyFine(zones, back ? mergeFine({ pieces: {}, texts: {} }, back) : undefined, f, fontStack(answers));
+  const art = out.find((z) => z.id === 'dibujo');
+  if (art?.type === 'image' && back?.images?.background) art.default = back.images.background;
+  return { zones: out };
 }
 
 const isContent = (z: Zone) => z.type === 'text' || z.type === 'attribute' || z.type === 'attributes';
@@ -145,7 +151,7 @@ export function withCardImages(zones: Zone[], images: CardImages | undefined, si
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /** Aplica el ajuste fino (colores, transparencia, bordes, letra, iconos) por id de zona. */
-export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number, fonts = FONT_PAIRS.clasica): Zone[] {
+export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number, fonts: { title: string; body: string } = FONT_PAIRS.clasica): Zone[] {
   if (!fine) return zones;
   const r2 = (v: number) => Math.round(v * 100) / 100;
   return zones.map((z) => {
@@ -199,7 +205,7 @@ export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number, 
       const scale = clamp(t.scale ?? 1, 0.7, 1.5);
       const font = { ...z.font, size: r2(z.font.size * scale) };
       if (t.color) font.color = t.color;
-      if (t.font) font.family = t.font === 'title' ? fonts.title : fonts.body;
+      if (t.font) font.family = t.font === 'title' ? fonts.title : t.font === 'body' ? fonts.body : `"${t.font}", ${fonts.body}`;
       if (t.bold !== undefined) font.weight = t.bold ? 'bold' : 'normal';
       if (t.italic !== undefined) font.style = t.italic ? 'italic' : 'normal';
       return {
@@ -277,7 +283,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
         }),
         fine,
         f,
-        FONT_PAIRS[a.adjust.fonts] ?? FONT_PAIRS.clasica,
+        fontStack(a),
       ),
       fine.images,
       size,
@@ -302,7 +308,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
     csv: 'cartas.csv',
     assetsDir: 'assets',
     card: size,
-    fonts: [],
+    fonts: (a.fonts ?? []).filter((x) => x.family.trim() && x.file.trim()).map((x) => ({ family: x.family.trim(), file: x.file })),
     attributes,
     templates,
     colors,
@@ -316,7 +322,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   if (any('flavor')) fields.push(...langs.map((l) => col('sabor', l)));
   if (usesCost || any('stats')) fields.push('atributos');
   if (usesVariant) fields.push(variantCol);
-  if (any('art')) fields.push('ilustracion');
+  if (any('art')) fields.push('ilustracion', 'encuadre');
   if (any('number')) fields.push('numero');
   fields.push('copias');
   if (a.backs === 'per-type') fields.push('color');
@@ -358,6 +364,7 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       if (r.elements.has('variant') && a.variant.values.length)
         row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;
       if (r.elements.has('art') && own('ilustracion')) row.ilustracion = own('ilustracion');
+      if (r.elements.has('art') && own('encuadre')) row.encuadre = own('encuadre');
       if (own('copias')) row.copias = own('copias');
       if (r.elements.has('number')) row.numero = `${String(serial).padStart(width, '0')}/${String(total).padStart(width, '0')}`;
       rows.push(row);

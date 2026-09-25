@@ -2,18 +2,21 @@
   import { DirectorySource, FileListSource, UrlSource, type FileSource } from './core/assets';
   import { DEFAULT_CSV, defaultProject, PROJECT_FILE, serializeProject } from './core/project';
   import CardsView from './lib/CardsView.svelte';
+  import CardTable from './lib/CardTable.svelte';
   import ProjectSettings from './lib/ProjectSettings.svelte';
   import ResourcesView from './lib/ResourcesView.svelte';
   import TemplateEditor from './lib/TemplateEditor.svelte';
   import Wizard from './lib/wizard/Wizard.svelte';
+  import { loadResume, type ResumeContext } from './lib/wizard/resume';
   import { Workspace } from './lib/workspace.svelte';
 
-  type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'cartas';
+  type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'tabla' | 'cartas';
   const TABS: [Tab, string][] = [
     ['proyecto', '1 · Proyecto'],
     ['recursos', '2 · Recursos'],
     ['plantillas', '3 · Plantillas'],
-    ['cartas', '4 · Cartas'],
+    ['tabla', '4 · Tabla'],
+    ['cartas', '5 · Cartas'],
   ];
 
   const ws = new Workspace();
@@ -21,17 +24,40 @@
   let autoReload = $state(false);
   let editorKey = $state(0);
   let editTipo = $state('');
+  let editZone = $state('');
+  let editRow = $state('');
   let fileInput: HTMLInputElement;
   let wizard = $state(false);
+  /** Con él, el asistente trabaja sobre el proyecto abierto en vez de crear uno nuevo. */
+  let resume = $state.raw<ResumeContext | null>(null);
   let notice = $state('');
 
   function openWizard() {
-    if (confirmDiscard()) wizard = true;
+    if (!confirmDiscard()) return;
+    resume = null;
+    wizard = true;
+  }
+
+  /** `jump`: ir directo al recorrido, a ese tipo y al elemento que contiene esa zona. */
+  async function resumeWizard(jump?: { type: string; zone: string }) {
+    const lp = ws.lp;
+    if (!lp || !ws.source) return;
+    if (ws.dirty && !confirm('Hay cambios sin guardar. El asistente trabaja sobre lo guardado: ¿guardarlos antes de seguir?')) return;
+    if (ws.dirty) await ws.save();
+    try {
+      const ctx = await loadResume(ws.source, lp.project);
+      resume = ctx && jump ? { ...ctx, jump } : ctx;
+      if (resume) wizard = true;
+      else ws.error = 'Este proyecto no se hizo con el asistente (no tiene asistente.json).';
+    } catch (e) {
+      ws.error = e instanceof Error ? e.message : String(e);
+    }
   }
 
   async function fromWizard(src: FileSource, note = '') {
-    if (await ws.open(src)) {
+    if (await ws.open(src, true)) {
       wizard = false;
+      resume = null;
       tab = 'cartas';
       notice = note;
     }
@@ -87,8 +113,10 @@
     }
   }
 
-  function editTemplate(tipo: string) {
+  function editTemplate(tipo: string, zone = '', row = '') {
     editTipo = tipo;
+    editZone = zone;
+    editRow = row;
     editorKey++;
     tab = 'plantillas';
   }
@@ -133,7 +161,8 @@
       busy = true;
       try {
         const s = await src.stamp!(paths);
-        if (last && s !== last) await ws.open(src);
+        // Con cambios en la tabla sin guardar no se relee el CSV: se perderían.
+        if (last && s !== last && !ws.rowsDirty) await ws.open(src);
         last = s;
       } finally {
         busy = false;
@@ -180,11 +209,19 @@
       <span class="sep"></span>
     {/if}
 
+    {#if ws.lp && ws.hasWizard && !wizard}
+      <button class="ghost" onclick={() => resumeWizard()} disabled={ws.loading} title="Volver al asistente con este proyecto para cambiar lo que quieras">Asistente</button>
+    {/if}
     <button class="ghost" onclick={openWizard} disabled={ws.loading || wizard} title="Crear un proyecto con el asistente">Nuevo…</button>
     <button class="ghost" onclick={openFolder} disabled={ws.loading}>Abrir…</button>
     <button class="ghost" onclick={openExample} disabled={ws.loading}>Ejemplo</button>
     {#if ws.source}
-      <button class="ghost" onclick={() => ws.source && ws.open(ws.source)} disabled={ws.loading || !canReload} title="Volver a leer CSV e imágenes">⟳</button>
+      <button
+        class="ghost"
+        onclick={() => ws.source && (!ws.rowsDirty || confirm('Hay cambios en la tabla de cartas sin guardar: al volver a leer el CSV se pierden. ¿Seguir?')) && ws.open(ws.source)}
+        disabled={ws.loading || !canReload}
+        title="Volver a leer CSV e imágenes">⟳</button
+      >
       {#if ws.source.stamp}
         <label class="check" title="Recargar al guardar el CSV desde otro programa"><input type="checkbox" bind:checked={autoReload} /> auto</label>
       {/if}
@@ -200,7 +237,9 @@
 
   <div class="body">
     {#if wizard}
-      <Wizard oncreate={fromWizard} oncancel={() => (wizard = false)} />
+      {#key resume}
+        <Wizard {resume} oncreate={fromWizard} oncancel={() => ((wizard = false), (resume = null))} />
+      {/key}
     {:else if !ws.lp}
       <div class="welcome">
         <h1>Creador de cartas</h1>
@@ -222,12 +261,14 @@
       <ProjectSettings {ws} onedit={editTemplate} />
     {:else if tab === 'recursos'}
       <ResourcesView {ws} />
+    {:else if tab === 'tabla'}
+      <CardTable {ws} />
     {:else if tab === 'plantillas'}
       {#key editorKey}
-        <TemplateEditor {ws} initialTipo={editTipo} />
+        <TemplateEditor {ws} initialTipo={editTipo} initialZone={editZone} initialRow={editRow} />
       {/key}
     {:else}
-      <CardsView {ws} />
+      <CardsView {ws} onedit={editTemplate} onwizard={ws.hasWizard ? (type, zone) => resumeWizard({ type, zone }) : undefined} />
     {/if}
   </div>
 </div>

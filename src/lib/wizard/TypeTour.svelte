@@ -4,7 +4,7 @@
   import {
     attrKey,
     ELEMENTS as CONTENT,
-    FONT_PAIRS,
+    fontStack,
     isAbility,
     mergeFine,
     type FineTune,
@@ -17,6 +17,9 @@
   } from '../../core/wizard/answers';
   import ResourceShelf from '../ResourceShelf.svelte';
   import ResourceSlot from '../ResourceSlot.svelte';
+  import PieceControls from '../panels/PieceControls.svelte';
+  import Swatches from '../panels/Swatches.svelte';
+  import TextControls from '../panels/TextControls.svelte';
   import { clearOwn, contentType, ELEMENT_OF, fineFor, hasOwn, type Library, type Scope, type TourElement } from './tour';
 
   let {
@@ -60,13 +63,6 @@
   const zone = (id: string) => zones.find((z) => z.id === id);
   const palette = $derived(answers.adjust.palette);
 
-  const COLORS: [PieceColor, string][] = [
-    ['principal', 'Principal'],
-    ['acento', 'Acento'],
-    ['papel', 'Papel'],
-    ['tinta', 'Tinta'],
-    ['none', 'Transparente'],
-  ];
 
   // ---------------------------------------------------------- escribir en el ajuste que toca
   // Ojo: en un estado de Svelte, `a.b ??= {}` devuelve el objeto sin envolver; hay que volver a leerlo.
@@ -129,7 +125,8 @@
   }
 
   const px = $derived(cardPixels({ width: answers.size.width, height: answers.size.height }, 300));
-  const fonts = $derived(FONT_PAIRS[answers.adjust.fonts] ?? FONT_PAIRS.clasica);
+  const fonts = $derived(fontStack(answers));
+  const customFonts = $derived((answers.fonts ?? []).map((f) => f.family));
 
   // ---------------------------------------------------------- contenido del tipo
 
@@ -158,75 +155,20 @@
 </script>
 
 {#snippet swatches(value: string | undefined, label: string, onpick: (c: PieceColor) => void, none = true)}
-  <div class="swatches">
-    {#each COLORS.filter(([c]) => none || c !== 'none') as [c, name]}
-      <button
-        class="sw"
-        class:active={value === c}
-        class:none={c === 'none'}
-        title={name}
-        aria-label="{label}: {name}"
-        style:background={c === 'none' ? undefined : palette[c]}
-        onclick={() => onpick(c)}
-      ></button>
-    {/each}
-  </div>
+  <Swatches {value} {label} {palette} {none} {onpick} />
 {/snippet}
 
 {#snippet pieceRow(id: string, label: string, fillable = true)}
   {@const z = zone(id)}
   {#if z && z.type === 'shape'}
-    {@const cur = eff.pieces[id] ?? {}}
-    {@const fill = cur.fill ?? (z.fill || 'none')}
-    {@const opacity = cur.opacity ?? z.opacity ?? 1}
-    {@const border = cur.border ?? !!z.stroke}
-    <div class="ctl">
-      <span class="lbl">{label}</span>
-      {#if fillable}
-        {@render swatches(fill, label, (c) => (piece(id).fill = c))}
-        <label class="inline" title="Opacidad">
-          <input type="range" min="0" max="1" step="0.05" value={opacity} oninput={(e) => (piece(id).opacity = e.currentTarget.valueAsNumber)} aria-label="Opacidad de {label}" />
-          {Math.round(opacity * 100)} %
-        </label>
-      {/if}
-      <label class="inline"><input type="checkbox" checked={border} onchange={(e) => (piece(id).border = e.currentTarget.checked)} /> Borde</label>
-    </div>
+    <PieceControls zone={z} style={eff.pieces[id] ?? {}} {label} {palette} {fillable} onchange={(p) => Object.assign(piece(id), p)} />
   {/if}
 {/snippet}
 
 {#snippet textRows(id: string, label: string)}
   {@const z = zone(id)}
   {#if z && z.type === 'text'}
-    {@const cur = eff.texts[id] ?? {}}
-    {@const family = cur.font ?? (z.font.family === fonts.title && fonts.title !== fonts.body ? 'title' : 'body')}
-    <div class="ctl">
-      <span class="lbl">Color</span>
-      {@render swatches(cur.color, `${label}, color`, (c) => (text(id).color = c as never), false)}
-    </div>
-    <div class="ctl">
-      <span class="lbl">Alineación</span>
-      <div class="seg" role="group" aria-label="Alineación de {label}">
-        {#each [['left', 'Izquierda'], ['center', 'Centro'], ['right', 'Derecha'], ['justify', 'Justificado']] as [v, name]}
-          <button class:active={(cur.align ?? z.align ?? 'left') === v} onclick={() => (text(id).align = v as never)}>{name}</button>
-        {/each}
-      </div>
-    </div>
-    <div class="ctl">
-      <span class="lbl">Tamaño</span>
-      <label class="inline">
-        <input type="range" min="0.7" max="1.5" step="0.05" value={cur.scale ?? 1} oninput={(e) => (text(id).scale = e.currentTarget.valueAsNumber)} aria-label="Tamaño de {label}" />
-        {Math.round((cur.scale ?? 1) * 100)} %
-      </label>
-    </div>
-    <div class="ctl">
-      <span class="lbl">Letra</span>
-      <div class="seg" role="group" aria-label="Letra de {label}">
-        <button class:active={family === 'title'} onclick={() => (text(id).font = 'title')} style:font-family={fonts.title}>La de títulos</button>
-        <button class:active={family === 'body'} onclick={() => (text(id).font = 'body')} style:font-family={fonts.body}>La de textos</button>
-      </div>
-      <label class="inline"><input type="checkbox" checked={cur.bold ?? z.font.weight === 'bold'} onchange={(e) => (text(id).bold = e.currentTarget.checked)} /> Negrita</label>
-      <label class="inline"><input type="checkbox" checked={cur.italic ?? z.font.style === 'italic'} onchange={(e) => (text(id).italic = e.currentTarget.checked)} /> Cursiva</label>
-    </div>
+    <TextControls zone={z} style={eff.texts[id] ?? {}} {label} {palette} {fonts} custom={customFonts} onchange={(p) => Object.assign(text(id), p)} />
   {/if}
 {/snippet}
 
@@ -657,24 +599,6 @@
     background: var(--accent);
     border-color: var(--accent);
     color: #fff;
-  }
-  .swatches {
-    display: flex;
-    gap: 4px;
-  }
-  .sw {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 5px;
-    border: 2px solid var(--border);
-  }
-  .sw.none {
-    background: repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0 / 8px 8px;
-  }
-  .sw.active {
-    border-color: #fff;
-    outline: 2px solid var(--accent);
   }
   .slots,
   .images {

@@ -12,7 +12,17 @@
   import CardView from './CardView.svelte';
   import type { Workspace } from './workspace.svelte';
 
-  let { ws }: { ws: Workspace } = $props();
+  let {
+    ws,
+    onedit,
+    onwizard,
+  }: {
+    ws: Workspace;
+    /** Abrir una zona de una plantilla en el editor (desde el detalle de una carta). */
+    onedit?: (tipo: string, zone: string, rowId: string) => void;
+    /** Ajustar un elemento en el asistente. */
+    onwizard?: (tipo: string, zone: string) => void;
+  } = $props();
 
   const SIZES = { S: 150, M: 210, L: 300 };
   type Entry = { row: CardRow; index: number };
@@ -274,6 +284,8 @@
     {exportOpts}
     onclose={() => (selected = null)}
     onselect={(i) => (selected = i)}
+    {onedit}
+    {onwizard}
   />
 {/if}
 

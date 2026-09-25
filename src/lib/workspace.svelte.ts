@@ -1,8 +1,10 @@
 import type { FileSource } from '../core/assets';
 import { downloadBlob } from '../core/export';
 import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../core/project';
-import type { Project } from '../core/types';
-import { resourcePath, type ShelfId } from '../core/wizard/resources';
+import { detectLangs, serializeCsv } from '../core/csv';
+import type { CardRow, Project } from '../core/types';
+import { resourcePath, type ResourceDir } from '../core/wizard/resources';
+import { WIZARD_FILE } from '../core/wizard/sync';
 
 const HISTORY_LIMIT = 200;
 /** Cambios seguidos sobre el mismo campo en este intervalo cuentan como un solo paso de deshacer. */
@@ -12,8 +14,15 @@ function message(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
+/** Lo que se puede deshacer: el proyecto y la tabla de cartas. */
+interface Snapshot {
+  project: Project;
+  rows: CardRow[];
+  columns: string[];
+}
+
 /**
- * Estado compartido de la aplicación. El proyecto es inmutable: cada edición crea
+ * Estado compartido de la aplicación. El proyecto y las filas son inmutables: cada edición crea
  * una copia nueva, lo que da deshacer/rehacer gratis y hace que la vista se redibuje.
  */
 export class Workspace {
@@ -27,9 +36,14 @@ export class Workspace {
   error = $state('');
   canUndo = $state(false);
   canRedo = $state(false);
+  /** El proyecto se hizo con el asistente (tiene asistente.json): se puede retomar. */
+  hasWizard = $state(false);
 
-  #undo: Project[] = [];
-  #redo: Project[] = [];
+  #undo: Snapshot[] = [];
+  #redo: Snapshot[] = [];
+  /** Filas tal como están en el disco: si cambian, al guardar se escribe también el CSV. */
+  #savedRows: CardRow[] | null = null;
+  #savedColumns: string[] | null = null;
   #lastKey = '';
   #lastTime = 0;
 
@@ -37,11 +51,12 @@ export class Workspace {
     return this.lp?.project ?? null;
   }
 
-  async open(src: FileSource): Promise<boolean> {
+  /** Con `fresh`, se relee todo aunque sea la misma carpeta y se empieza un historial nuevo. */
+  async open(src: FileSource, fresh = false): Promise<boolean> {
     this.loading = true;
     this.error = '';
     try {
-      const same = src === this.source;
+      const same = src === this.source && !fresh;
       // Al recargar la misma carpeta con cambios sin guardar se conserva el proyecto editado.
       const next = await loadProject(src, same && this.dirty ? (this.lp?.project ?? undefined) : undefined);
       const old = this.lp;
@@ -55,6 +70,9 @@ export class Workspace {
       }
       if (!next.langs.includes(this.lang)) this.lang = next.langs.includes('es') ? 'es' : (next.langs[0] ?? '');
       this.assetFiles = (await src.list?.(next.project.assetsDir)) ?? [];
+      this.hasWizard = !!(await src.read(WIZARD_FILE));
+      this.#savedRows = next.rows;
+      this.#savedColumns = next.columns;
       setTimeout(() => old?.assets.dispose(), 5000);
       return true;
     } catch (e) {
@@ -71,48 +89,86 @@ export class Workspace {
    * - `live`: no crea paso de deshacer; se usa durante un arrastre después de `begin()`.
    */
   update(fn: (p: Project) => void, opts: { coalesce?: string; live?: boolean } = {}) {
-    const current = this.lp?.project;
-    if (!current) return;
-    const next = structuredClone(current);
+    const lp = this.lp;
+    if (!lp) return;
+    const next = structuredClone(lp.project);
     fn(next);
+    this.#change({ project: next, rows: lp.rows, columns: lp.columns }, opts);
+  }
+
+  /**
+   * Cambia la tabla de cartas. `fn` recibe copias de las filas y las columnas y las modifica;
+   * las filas que no toca siguen siendo las mismas (se guarda solo lo que cambia).
+   */
+  updateRows(fn: (rows: CardRow[], columns: string[]) => void, opts: { coalesce?: string } = {}) {
+    const lp = this.lp;
+    if (!lp) return;
+    const rows = [...lp.rows];
+    const columns = [...lp.columns];
+    fn(rows, columns);
+    this.#change({ project: lp.project, rows, columns }, opts);
+  }
+
+  /** ¿Hay cambios en la tabla sin guardar? */
+  get rowsDirty(): boolean {
+    return !!this.lp && (this.lp.rows !== this.#savedRows || this.lp.columns !== this.#savedColumns);
+  }
+
+  #change(next: Snapshot, opts: { coalesce?: string; live?: boolean }) {
     const now = performance.now();
     const merge = opts.live || (!!opts.coalesce && opts.coalesce === this.#lastKey && now - this.#lastTime < COALESCE_MS);
-    if (!merge) this.#push(current);
+    if (!merge) this.#push(this.#snapshot()!);
     this.#lastKey = opts.coalesce ?? '';
     this.#lastTime = now;
     this.#set(next);
   }
 
+  #snapshot(): Snapshot | null {
+    const lp = this.lp;
+    return lp ? { project: lp.project, rows: lp.rows, columns: lp.columns } : null;
+  }
+
   /** Guarda el estado actual como paso de deshacer antes de una serie de cambios `live`. */
   begin() {
-    if (this.lp) this.#push(this.lp.project);
+    const snap = this.#snapshot();
+    if (snap) this.#push(snap);
     this.#lastKey = '';
   }
 
   undo() {
     const prev = this.#undo.pop();
-    if (!prev || !this.lp) return;
-    this.#redo.push(this.lp.project);
+    const cur = this.#snapshot();
+    if (!prev || !cur) return;
+    this.#redo.push(cur);
     this.#lastKey = '';
     this.#set(prev);
   }
 
   redo() {
     const next = this.#redo.pop();
-    if (!next || !this.lp) return;
-    this.#undo.push(this.lp.project);
+    const cur = this.#snapshot();
+    if (!next || !cur) return;
+    this.#undo.push(cur);
     this.#lastKey = '';
     this.#set(next);
   }
 
-  /** Escribe proyecto.json en la carpeta o, si no se puede, lo descarga. */
+  /** Escribe proyecto.json (y el CSV si la tabla cambió) en la carpeta o, si no se puede, los descarga. */
   async save() {
-    const project = this.lp?.project;
-    if (!project) return;
+    const lp = this.lp;
+    if (!lp) return;
     try {
-      const text = serializeProject(project);
-      if (this.source?.write) await this.source.write(PROJECT_FILE, text);
-      else downloadBlob(new Blob([text], { type: 'application/json' }), PROJECT_FILE);
+      const text = serializeProject(lp.project);
+      const csv = this.rowsDirty ? serializeCsv(lp.rows, lp.columns, lp.csvFormat) : null;
+      if (this.source?.write) {
+        await this.source.write(PROJECT_FILE, text);
+        if (csv !== null) await this.source.write(lp.project.csv, csv);
+      } else {
+        downloadBlob(new Blob([text], { type: 'application/json' }), PROJECT_FILE);
+        if (csv !== null) downloadBlob(new Blob([csv], { type: 'text/csv' }), lp.project.csv.split('/').pop() || 'cartas.csv');
+      }
+      this.#savedRows = lp.rows;
+      this.#savedColumns = lp.columns;
       this.dirty = false;
     } catch (e) {
       this.error = `No se pudo guardar: ${message(e)}`;
@@ -136,7 +192,7 @@ export class Workspace {
   }
 
   /** Añade archivos a un estante de la biblioteca sin pisar los que ya hay; devuelve sus rutas. */
-  async addResources(files: File[], shelf: ShelfId): Promise<string[]> {
+  async addResources(files: File[], shelf: ResourceDir): Promise<string[]> {
     const lp = this.lp;
     if (!lp || !this.source?.write) return [];
     const taken = new Set(this.assetFiles);
@@ -174,16 +230,18 @@ export class Workspace {
     if (lp && this.source?.list) this.assetFiles = await this.source.list(lp.project.assetsDir);
   }
 
-  #push(p: Project) {
+  #push(p: Snapshot) {
     this.#undo.push(p);
     if (this.#undo.length > HISTORY_LIMIT) this.#undo.shift();
     this.#redo = [];
   }
 
-  #set(next: Project) {
+  #set(snap: Snapshot) {
     const lp = this.lp!;
+    const next = snap.project;
     const fontsChanged = JSON.stringify(lp.project.fonts) !== JSON.stringify(next.fonts);
-    this.lp = { ...lp, project: next };
+    const langs = snap.columns === lp.columns ? lp.langs : detectLangs(snap.columns);
+    this.lp = { ...lp, project: next, rows: snap.rows, columns: snap.columns, langs };
     this.dirty = true;
     this.#syncHistory();
     if (fontsChanged) {

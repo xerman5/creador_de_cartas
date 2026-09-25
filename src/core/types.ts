@@ -48,6 +48,8 @@ export interface ImageZone extends ZoneBase {
   bind?: string;
   default?: string;
   fit?: 'cover' | 'contain' | 'stretch';
+  /** Columna del CSV con el encuadre de cada carta («30% 40% 1.5»: punto central y zoom). Solo con «cubrir». */
+  cropBind?: string;
 }
 
 export interface TextZone extends ZoneBase {

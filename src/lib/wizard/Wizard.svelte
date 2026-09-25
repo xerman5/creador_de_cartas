@@ -1,7 +1,11 @@
 <script lang="ts">
   import { DirectorySource, MemorySource, type FileSource } from '../../core/assets';
   import { downloadBlob, saveZip, slug } from '../../core/export';
-  import { PROJECT_FILE, type LoadedProject } from '../../core/project';
+  import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../../core/project';
+  import { pendingItems, type PendingItem } from '../../core/pending';
+  import { renderCard } from '../../core/render';
+  import { applyAll, handEdited, newWizardFile, WIZARD_FILE, wizardFileJson } from '../../core/wizard/sync';
+  import type { ResumeContext } from './resume';
   import type { RenderOptions } from '../../core/render';
   import { normalizeKey } from '../../core/text';
   import {
@@ -12,6 +16,7 @@
     ELEMENTS,
     flagOn,
     FONT_PAIRS,
+    fontStack,
     isAbility,
     PALETTES,
     resolvedType,
@@ -23,16 +28,30 @@
     type WizardAnswers,
   } from '../../core/wizard/answers';
   import { buildProject, cardIds, costSvg, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles, provisionalIcon } from '../../core/wizard/build';
-  import { matchByName, resourceFiles, resourcePath, shelfOf, type Resources, type ShelfId } from '../../core/wizard/resources';
+  import {
+    FONT_FILE,
+    fontFamilyOf,
+    matchByName,
+    resourceFiles,
+    resourcePath,
+    shelfOf,
+    type ResourceDir,
+    type Resources,
+    type ShelfId,
+  } from '../../core/wizard/resources';
   import ResourceShelf from '../ResourceShelf.svelte';
   import ResourceSlot from '../ResourceSlot.svelte';
   import { tourElements, type Library } from './tour';
   import TypeTour from './TypeTour.svelte';
+  import PieceControls from '../panels/PieceControls.svelte';
+  import TextControls from '../panels/TextControls.svelte';
+  import { cardPixels } from '../../core/card';
   import { acceptsDrop, droppedEntries } from '../drop';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
   import CardView from '../CardView.svelte';
+  import CropEditor from '../CropEditor.svelte';
   import {
     backRow,
     clearDraft,
@@ -48,7 +67,16 @@
     saveDraftResources,
   } from './preview';
 
-  let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
+  let {
+    oncreate,
+    oncancel,
+    resume = null,
+  }: {
+    oncreate: (src: FileSource, note?: string) => void;
+    oncancel: () => void;
+    /** Retomar el asistente sobre un proyecto ya creado (si no, se crea uno nuevo). */
+    resume?: ResumeContext | null;
+  } = $props();
 
   const STEPS = [
     { id: 'proyecto', title: 'Tu juego' },
@@ -76,11 +104,19 @@
     ['pt', 'Portugués'],
   ];
 
-  const draft = loadDraft();
-  let answers = $state<WizardAnswers>(draft?.answers ?? defaultAnswers());
-  let step = $state(stepIndex(draft?.step ?? 0));
-  let reached = $state(stepIndex(draft?.step ?? 0));
-  let current = $state(0);
+  // Al retomar un proyecto no se usa el borrador del navegador: el proyecto es la fuente de verdad.
+  // svelte-ignore state_referenced_locally
+  const start = resume;
+  const draft = start ? null : loadDraft();
+  // Retomando, se vuelve adonde se dejó; si se dejó al crear, al recorrido (lo más probable es retocar).
+  const firstStep = start ? (start.jump || start.file.step === 'crear' ? 'recorrido' : start.file.step) : (draft?.step ?? 0);
+  let answers = $state<WizardAnswers>(start?.answers ?? draft?.answers ?? defaultAnswers());
+  let step = $state(stepIndex(firstStep));
+  let reached = $state(start ? STEPS.length - 1 : stepIndex(firstStep));
+  /** Respuestas al entrar, para saber si hay cambios sin aplicar. */
+  const initial = JSON.stringify(start?.answers ?? null);
+  // svelte-ignore state_referenced_locally
+  let current = $state(Math.max(0, start?.jump ? answers.types.findIndex((t) => typeKey(t) === normalizeKey(start.jump!.type)) : 0));
   /** Carta seleccionada en la tabla (índice dentro del tipo actual). */
   let row = $state(0);
   const stepId = $derived<StepId>(STEPS[step].id);
@@ -115,7 +151,7 @@
     const sid = stepId;
     let cancelled = false;
     const t = setTimeout(async () => {
-      saveDraft(snap, sid);
+      if (!start) saveDraft(snap, sid);
       try {
         const lp = await previewProject(snap, { focus: f, images, resources: res });
         if (cancelled) return lp.assets.dispose();
@@ -268,7 +304,12 @@
 
   // ------------------------------------------------------------ progreso
 
-  let notice = $state('');
+  let notice = $state(
+    start
+      ? `Retomas el asistente de «${start.answers.name}». Cambia lo que quieras y, al final, «Aplicar».` +
+          (start.notes.length ? ` Se han traído los cambios hechos fuera del asistente: ${start.notes.join(', ')}.` : '')
+      : '',
+  );
   let progressInput: HTMLInputElement;
 
   async function saveProgress() {
@@ -296,12 +337,13 @@
   // ------------------------------------------------------------ recursos (iconos y fondos)
 
   /** Iconos y fondos subidos: van al proyecto y al archivo de progreso. */
-  let resources = $state.raw<Resources>(new Map());
+  let resources = $state.raw<Resources>(start?.resources ?? new Map());
   let resourceUrls = $state.raw<Map<string, string>>(new Map());
   // Al abrir, los del borrador de este navegador (si no se ha cargado ya otra cosa).
-  loadDraftResources().then((r) => {
-    if (!resources.size && r.size) resources = r;
-  });
+  if (!start)
+    loadDraftResources().then((r) => {
+      if (!resources.size && r.size) resources = r;
+    });
 
   $effect(() => {
     const m = new Map([...resources].map(([p, b]) => [p, URL.createObjectURL(b)]));
@@ -311,11 +353,11 @@
 
   function setResources(next: Resources) {
     resources = next;
-    saveDraftResources(next);
+    if (!start) saveDraftResources(next);
   }
 
   /** Copia archivos a un estante y devuelve sus rutas (en el mismo orden). */
-  function addResources(files: File[], shelf: ShelfId): string[] {
+  function addResources(files: File[], shelf: ResourceDir): string[] {
     const next = new Map(resources);
     const paths = files.map((f) => {
       const path = resourcePath(shelf, f.name, (p) => next.has(p));
@@ -335,6 +377,16 @@
     for (const f of [answers.fine, ...answers.types.map((t) => t.fine)]) {
       if (f?.images?.background === path) delete f.images.background;
       if (f?.images?.frame === path) delete f.images.frame;
+    }
+    if (answers.backFine?.images?.background === path) delete answers.backFine.images.background;
+    // Una fuente: deja de usarse donde estuviera elegida.
+    const font = answers.fonts?.find((x) => x.file === path);
+    if (font) {
+      answers.fonts = answers.fonts!.filter((x) => x !== font);
+      if (answers.adjust.titleFont === font.family) answers.adjust.titleFont = undefined;
+      if (answers.adjust.bodyFont === font.family) answers.adjust.bodyFont = undefined;
+      for (const f of [answers.fine, ...answers.types.map((t) => t.fine)])
+        for (const st of Object.values(f?.texts ?? {})) if (st.font === font.family) delete st.font;
     }
   }
 
@@ -359,6 +411,38 @@
     picking = null;
   }
 
+  // ------------------------------------------------------------ fuentes propias
+
+  let fontInput = $state<HTMLInputElement>();
+  let fontOver = $state(false);
+  /** Fuentes ya cargadas en la página (para enseñar su muestra). */
+  const loadedFonts = new Set<string>();
+
+  function addFonts(files: File[]) {
+    const fonts = files.filter((f) => FONT_FILE.test(f.name));
+    const paths = addResources(fonts, 'fuentes');
+    const list = (answers.fonts ??= []);
+    fonts.forEach((f, i) => {
+      let family = fontFamilyOf(f.name);
+      for (let n = 2; list.some((x) => x.family === family); n++) family = `${fontFamilyOf(f.name)} ${n}`;
+      answers.fonts!.push({ family, file: paths[i] });
+    });
+  }
+
+  $effect(() => {
+    for (const fnt of answers.fonts ?? []) {
+      const blob = resources.get(fnt.file);
+      const key = `${fnt.family}|${fnt.file}`;
+      if (!blob || loadedFonts.has(key)) continue;
+      loadedFonts.add(key);
+      blob
+        .arrayBuffer()
+        .then((buf) => new FontFace(fnt.family, buf).load())
+        .then((face) => document.fonts.add(face))
+        .catch(() => (error = `No se pudo leer la fuente «${fnt.file}».`));
+    }
+  });
+
   /** Iconos nuevos: los que se llaman como un atributo sin icono propio se le asignan solos. */
   function addIcons(files: File[]) {
     const paths = addResources(files, 'iconos');
@@ -378,12 +462,42 @@
       (matched.size ? `; puestos por su nombre: ${[...matched.keys()].join(', ')}.` : '. Arrástralos a cada atributo o haz clic en su icono.');
   }
 
+  // ------------------------------------------------------------ trasera
+
+  const backZones = $derived(preview?.project.templates.trasera?.zones ?? []);
+  const backPx = $derived(cardPixels({ width: answers.size.width, height: answers.size.height }, 300));
+  let pickingBack = $state(false);
+
+  /** El ajuste de una pieza o un texto de la trasera, creándolo si hace falta. */
+  function backStyle(kind: 'pieces' | 'texts', id: string): Record<string, unknown> {
+    answers.backFine ??= {};
+    answers.backFine[kind] ??= {};
+    answers.backFine[kind]![id] ??= {};
+    return answers.backFine[kind]![id] as Record<string, unknown>;
+  }
+
+  function setBackImage(path: string | undefined) {
+    answers.backFine ??= {};
+    answers.backFine.images ??= {};
+    if (path) answers.backFine.images.background = path;
+    else delete answers.backFine.images.background;
+    pickingBack = false;
+  }
+
   // ------------------------------------------------------------ recorrido tipo a tipo
 
   const tplZones = $derived(preview?.project.templates[typeKey({ label: previewLabel(currentType?.label) })]?.zones ?? []);
   const tour = $derived(tourElements(tplZones));
   /** Elemento del recorrido; puede pasarse del final (volviendo hacia atrás) y se ajusta al dibujar. */
   let tourEl = $state(0);
+  /** Zona a la que se salta al retomar desde una carta: se busca su elemento en cuanto se dibuja la plantilla. */
+  let jumpZone = start?.jump?.zone ?? '';
+  $effect(() => {
+    if (!jumpZone || !tour.length) return;
+    const i = tour.findIndex((e) => e.zones.includes(jumpZone));
+    if (i >= 0) tourEl = i;
+    jumpZone = '';
+  });
   const tourAt = $derived(Math.min(tourEl, Math.max(0, tour.length - 1)));
 
   /** Avanza (o retrocede) un elemento; devuelve false si ya no quedan y hay que cambiar de paso. */
@@ -413,7 +527,23 @@
 
   let lang = $state('');
   const tableLang = $derived(answers.langs.includes(lang) ? lang : answers.langs[0]);
-  const columns = $derived<TableColumn[]>(currentType ? tableColumns(answers, [currentType], tableLang) : []);
+  // El encuadre va en el CSV pero se ajusta arrastrando la imagen, junto a la vista previa.
+  const columns = $derived<TableColumn[]>(currentType ? tableColumns(answers, [currentType], tableLang).filter((c) => c.kind !== 'crop') : []);
+
+  /** Imagen propia de la carta seleccionada y forma de su zona, para encuadrarla. */
+  let cropImage = $state.raw<{ src: string; aspect: number } | null>(null);
+  $effect(() => {
+    const t = currentType;
+    const path = t && focus ? cell(t, row, 'ilustracion') : '';
+    const art = tplZones.find((z) => z.id === 'ilustracion');
+    const lp = preview;
+    if (!path || !art || !lp || art.type !== 'image' || art.bleed) return void (cropImage = null);
+    let cancelled = false;
+    lp.assets.image(path).then((img) => {
+      if (!cancelled) cropImage = img ? { src: img.src, aspect: art.rect.w / art.rect.h } : null;
+    });
+    return () => (cancelled = true);
+  });
   const ids = $derived(cardIds(answers.types));
   let csvInput: HTMLInputElement;
   let importReport = $state<ImportReport | null>(null);
@@ -479,7 +609,7 @@
   const fileKeyOf = (label: string | undefined) => fileKey(label?.trim() || 'criatura');
 
   /** Ruta dentro de la carpeta elegida → archivo. Solo en memoria: no se guarda en el borrador. */
-  let imageMap = $state.raw<Map<string, File>>(new Map());
+  let imageMap = $state.raw<Map<string, Blob>>(start?.images ?? new Map());
   let byOrder = $state(true);
   let match = $state.raw<MatchResult | null>(null);
   let folderInput: HTMLInputElement;
@@ -570,7 +700,110 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
     const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
-    return { ...projectFiles(buildProject(snap)), ...resourceFiles(resources), ...imageFiles(images) };
+    const built = buildProject(snap);
+    return {
+      ...projectFiles(built),
+      ...resourceFiles(resources),
+      ...imageFiles(images),
+      // Con él, el proyecto se puede retomar después en el asistente.
+      [WIZARD_FILE]: newWizardFile(built, snap, 'crear'),
+    };
+  }
+
+  // ------------------------------------------------------------ repaso final
+
+  interface Review {
+    done: number;
+    total: number;
+    /** Avisos de cada carta que los tiene (texto que no cabe, imagen que falta…). */
+    cards: { id: string; type: number; index: number; warnings: string[] }[];
+    pending: PendingItem[];
+  }
+  let review = $state<Review | null>(null);
+
+  /** Al llegar a «Crear», se dibujan todas las cartas en pequeño para ver qué falla antes de crear. */
+  $effect(() => {
+    if (stepId !== 'crear') return;
+    const all = files();
+    const snap = $state.snapshot(answers) as WizardAnswers;
+    let cancelled = false;
+    (async () => {
+      const lp = await loadProject(new MemorySource('repaso', all));
+      const r: Review = { done: 0, total: lp.rows.length, cards: [], pending: pendingItems(lp) };
+      review = r;
+      const counters = new Map<string, number>();
+      for (const row of lp.rows) {
+        if (cancelled) break;
+        const type = snap.types.findIndex((t) => typeKey(t) === normalizeKey(row.tipo ?? ''));
+        const index = counters.get(row.tipo ?? '') ?? 0;
+        counters.set(row.tipo ?? '', index + 1);
+        const { warnings } = await renderCard(row, lp, { dpi: 30, lang: lp.langs[0] ?? '', bleed: false });
+        r.done++;
+        if (warnings.length) r.cards.push({ id: row.id ?? '', type, index, warnings: [...new Set(warnings)] });
+        if (r.done % 8 === 0 || r.done === r.total) review = { ...r, cards: [...r.cards] };
+      }
+      lp.assets.dispose();
+    })();
+    return () => (cancelled = true);
+  });
+
+  function goToCard(type: number, index: number) {
+    if (type < 0) return;
+    current = type;
+    row = index;
+    go(stepIndex('cartas'));
+  }
+
+  // ------------------------------------------------------------ retomar un proyecto
+
+  const writable = !!start?.source.write;
+  const changed = $derived(!!start && JSON.stringify($state.snapshot(answers)) !== initial);
+  /** Plantillas retocadas a mano que el asistente cambiaría: se pregunta qué hacer con cada una. */
+  const conflicts = $derived.by(() => {
+    if (!start || stepId !== 'crear') return [];
+    return handEdited(start.project, buildProject($state.snapshot(answers) as WizardAnswers).project, start.file.generated);
+  });
+  /** Plantillas retocadas que se regeneran (por defecto se conservan). */
+  let regenerate = $state<string[]>([]);
+
+  /** Recursos nuevos (o cambiados) respecto a lo que ya había en la carpeta. */
+  function freshFiles(): Record<string, Blob> {
+    const res = new Map([...resources].filter(([p, b]) => start?.resources.get(p) !== b));
+    const img = new Map([...imageMap].filter(([p, b]) => start?.images.get(p) !== b));
+    return { ...resourceFiles(res), ...imageFiles(img) };
+  }
+
+  /** Guarda las respuestas en la carpeta sin tocar el proyecto: se seguirá desde aquí. */
+  const saveInProject = () =>
+    run('Guardando…', async () => {
+      if (!start?.source.write) return;
+      await start.source.requestWrite?.();
+      for (const [path, data] of Object.entries(freshFiles())) await start.source.write(path, data);
+      const snap = $state.snapshot(answers) as WizardAnswers;
+      await start.source.write(WIZARD_FILE, wizardFileJson({ answers: snap, step: stepId, generated: start.file.generated }));
+      notice = 'Guardado en la carpeta del proyecto, sin aplicar: la próxima vez que abras el asistente seguirás aquí.';
+    });
+
+  const applyToProject = () =>
+    run('Aplicando…', async () => {
+      const src = start?.source;
+      if (!start || !src?.write) return;
+      const write = src.write.bind(src);
+      await src.requestWrite?.();
+      const snap = $state.snapshot(answers) as WizardAnswers;
+      const built = buildProject(snap);
+      const keep = new Set(conflicts.filter((k) => !regenerate.includes(k)));
+      const res = applyAll({ project: start.project }, start.csv, built, snap, 'crear', start.file.generated, keep);
+      for (const [path, data] of Object.entries({ ...built.files, ...freshFiles() })) await write(path, data);
+      await write(res.project.csv, res.csv);
+      await write(PROJECT_FILE, serializeProject(res.project));
+      await write(WIZARD_FILE, res.wizard);
+      oncreate(src, keep.size ? `Cambios aplicados. Se han conservado tus retoques en: ${[...keep].join(', ')}.` : 'Cambios del asistente aplicados al proyecto.');
+    });
+
+  function leave() {
+    if (changed && !confirm('Hay cambios del asistente sin aplicar. ¿Salir sin aplicarlos?')) return;
+    oncancel();
   }
 
   async function run(label: string, fn: () => Promise<void>) {
@@ -621,6 +854,39 @@
   {/if}
 {/snippet}
 
+{#snippet reviewPanel()}
+  <div class="field review">
+    <span>Repaso</span>
+    {#if !review}
+      <p class="hint">Preparando…</p>
+    {:else}
+      {#if review.done < review.total}
+        <p class="hint">Revisando las cartas: {review.done} de {review.total}…</p>
+      {:else if !review.cards.length && !review.pending.length}
+        <p class="ok">Todo en orden: {review.total} cartas revisadas, sin avisos ni nada pendiente.</p>
+      {:else}
+        <p class="hint">{review.total} cartas revisadas.</p>
+      {/if}
+      {#if review.cards.length}
+        <ul class="issues">
+          {#each review.cards.slice(0, 30) as c}
+            <li>
+              <button class="link" onclick={() => goToCard(c.type, c.index)} disabled={c.type < 0}>{c.id || `carta ${c.index + 1}`}</button>: {c.warnings.join('; ')}
+            </li>
+          {/each}
+          {#if review.cards.length > 30}<li>… y {review.cards.length - 30} más.</li>{/if}
+        </ul>
+      {/if}
+      {#if review.pending.length}
+        <p class="hint">Pendiente (se rellena con ejemplos y podrás terminarlo después):</p>
+        <ul class="issues">
+          {#each review.pending as it}<li>{it.label}</li>{/each}
+        </ul>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
 {#snippet typeTabs()}
   {#if answers.types.length > 1}
     <div class="tabs">
@@ -650,10 +916,19 @@
       {/each}
     </ol>
     <div class="nav-foot">
-      <button class="small" onclick={saveProgress} title="Descarga un archivo para seguir otro día o en otro ordenador">Guardar progreso</button>
-      <button class="ghost small" onclick={() => progressInput.click()}>Cargar progreso…</button>
-      <button class="ghost small" onclick={restart}>Empezar de cero</button>
-      <button class="ghost small" onclick={oncancel}>Salir</button>
+      {#if start}
+        <p class="hint">Proyecto «{start.source.label}»{changed ? ' · cambios sin aplicar' : ''}</p>
+        {#if writable}
+          <button class="small" onclick={saveInProject} disabled={!!busy} title="Guarda tus respuestas en la carpeta del proyecto sin cambiar las cartas">Guardar sin aplicar</button>
+        {/if}
+        <button class="ghost small" onclick={saveProgress} title="Descarga un archivo con tus respuestas">Descargar progreso</button>
+        <button class="ghost small" onclick={leave}>Salir</button>
+      {:else}
+        <button class="small" onclick={saveProgress} title="Descarga un archivo para seguir otro día o en otro ordenador">Guardar progreso</button>
+        <button class="ghost small" onclick={() => progressInput.click()}>Cargar progreso…</button>
+        <button class="ghost small" onclick={restart}>Empezar de cero</button>
+        <button class="ghost small" onclick={oncancel}>Salir</button>
+      {/if}
     </div>
   </nav>
 
@@ -961,6 +1236,67 @@
             </button>
           {/each}
         </div>
+        <div
+          class="fonts dropzone"
+          class:over={fontOver}
+          role="region"
+          aria-label="Tus fuentes"
+          ondragover={(e) => {
+            if (acceptsDrop(e)) {
+              e.preventDefault();
+              fontOver = true;
+            }
+          }}
+          ondragleave={() => (fontOver = false)}
+          ondrop={async (e) => {
+            fontOver = false;
+            e.preventDefault();
+            const files = [...(e.dataTransfer?.files ?? [])].filter((f) => FONT_FILE.test(f.name));
+            if (files.length) addFonts(files);
+          }}
+        >
+          <b>Tus fuentes</b>
+          {#each answers.fonts ?? [] as fnt}
+            <div class="font-row">
+              <span class="sample" style:font-family={`"${fnt.family}", sans-serif`}>Aa Bb 123 — {fnt.family}</span>
+              <button class="ghost small" onclick={() => removeResource(fnt.file)} title="Quitar" aria-label="Quitar {fnt.family}">✕</button>
+            </div>
+          {:else}
+            <p class="hint">Suelta aquí archivos TTF, OTF o WOFF (o elígelos) para usar tus propias fuentes. Revisa que su licencia permita usarlas en tu juego.</p>
+          {/each}
+          <div class="row">
+            <button class="small" onclick={() => fontInput?.click()}>＋ Añadir fuentes…</button>
+            {#if answers.fonts?.length}
+              <label class="inline">
+                Títulos con
+                <select bind:value={answers.adjust.titleFont} aria-label="Fuente de los títulos">
+                  <option value={undefined}>la de la combinación</option>
+                  {#each answers.fonts as fnt}<option value={fnt.family}>{fnt.family}</option>{/each}
+                </select>
+              </label>
+              <label class="inline">
+                Textos con
+                <select bind:value={answers.adjust.bodyFont} aria-label="Fuente de los textos">
+                  <option value={undefined}>la de la combinación</option>
+                  {#each answers.fonts as fnt}<option value={fnt.family}>{fnt.family}</option>{/each}
+                </select>
+              </label>
+            {/if}
+          </div>
+          <input
+            type="file"
+            hidden
+            multiple
+            accept=".ttf,.otf,.woff,.woff2"
+            bind:this={fontInput}
+            onchange={(e) => {
+              const files = [...(e.currentTarget.files ?? [])];
+              e.currentTarget.value = '';
+              if (files.length) addFonts(files);
+            }}
+          />
+        </div>
+        <p class="hint">En el recorrido «Tipo a tipo» puedes elegir la fuente de cada texto por separado.</p>
       </div>
       {#if uses('art') && (uses('rules') || uses('flavor'))}
         <label class="field">
@@ -1029,6 +1365,64 @@
           </button>
         {/each}
       </div>
+      {#if answers.backs !== 'none'}
+        {@const bz = (id: string) => backZones.find((z) => z.id === id)}
+        {@const bf = answers.backFine ?? {}}
+        <div class="field">
+          <span>Dibujo del dorso</span>
+          <div class="row">
+            <ResourceSlot
+              url={bf.images?.background ? resourceUrls.get(bf.images.background) : undefined}
+              label="Dibujo del dorso"
+              custom={!!bf.images?.background}
+              active={pickingBack}
+              size={56}
+              onclick={() => (pickingBack = !pickingBack)}
+              onfile={(f) => setBackImage(addResources([f], 'fondos')[0])}
+              onpath={(p) => setBackImage(p)}
+            />
+            <p class="hint">
+              Una imagen para todo el dorso, con sangrado (por ejemplo, {backPx.width} × {backPx.height} px a 300 ppp). Sin ella se usa un
+              dibujo provisional.
+              {#if bf.images?.background}<button class="ghost small" onclick={() => setBackImage(undefined)}>Volver al provisional</button>{/if}
+            </p>
+          </div>
+          {#if pickingBack}
+            <ResourceShelf
+              compact
+              items={shelfItems('fondos')}
+              selected={bf.images?.background ?? ''}
+              onpick={(p) => setBackImage(p)}
+              onadd={(files) => setBackImage(addResources(files, 'fondos')[0])}
+              onremove={removeResource}
+              empty="Sin fondos: suelta aquí la imagen del dorso."
+            />
+          {/if}
+        </div>
+        <div class="field">
+          <span>Banda y textos</span>
+          {#if bz('banda')?.type === 'shape'}
+            <PieceControls zone={bz('banda') as never} style={bf.pieces?.banda ?? {}} label="Banda" palette={answers.adjust.palette} onchange={(p) => Object.assign(backStyle('pieces', 'banda'), p)} />
+          {/if}
+          {#each [['nombre', 'Nombre del juego'], ['tipo', 'Nombre del tipo']] as [id, label]}
+            {#if bz(id)?.type === 'text'}
+              <details>
+                <summary>{label}</summary>
+                <TextControls
+                  zone={bz(id) as never}
+                  style={bf.texts?.[id] ?? {}}
+                  {label}
+                  palette={answers.adjust.palette}
+                  fonts={fontStack(answers)}
+                  custom={(answers.fonts ?? []).map((x) => x.family)}
+                  onchange={(p) => Object.assign(backStyle('texts', id), p)}
+                />
+              </details>
+            {/if}
+          {/each}
+          <p class="hint">Con un dibujo propio que ya lleve el nombre, puedes dejar la banda transparente y sin borde.</p>
+        </div>
+      {/if}
     {:else if stepId === 'cartas'}
       <h2>Las cartas</h2>
       <p class="lead">
@@ -1164,6 +1558,44 @@
         </tbody>
       </table>
       <p class="hint">Puedes cambiar la imagen de cualquier carta en la columna «Ilustración» de la tabla.</p>
+    {:else if start}
+      <h2>Aplicar los cambios</h2>
+      <ul class="summary">
+        <li><b>{answers.name}</b> · {answers.size.width} × {answers.size.height} mm + 3 mm de sangrado</li>
+        <li>{summary.types} {summary.types === 1 ? 'tipo' : 'tipos'} y {summary.cards} cartas: {labels.join(', ')}</li>
+        <li>{summary.written} de {summary.cards} cartas con datos propios · {summary.images} con ilustración propia</li>
+      </ul>
+      <p class="lead">
+        Se actualizan las plantillas, los atributos, los colores y la tabla del proyecto «{start.source.label}». Lo que el asistente no
+        conoce se queda como está: columnas propias del CSV, tipos y plantillas hechos a mano, fuentes y ajustes de exportación.
+      </p>
+      {#if conflicts.length}
+        <div class="field">
+          <span>Plantillas retocadas a mano</span>
+          <p class="hint">Estas plantillas se cambiaron en el editor después del asistente. ¿Qué hacemos con cada una?</p>
+          {#each conflicts as k}
+            <label class="check">
+              <input type="checkbox" checked={!regenerate.includes(k)} onchange={(e) => (regenerate = e.currentTarget.checked ? regenerate.filter((x) => x !== k) : [...regenerate, k])} />
+              Conservar mis retoques en «{k}» {regenerate.includes(k) ? '(se regenera con el asistente)' : ''}
+            </label>
+          {/each}
+        </div>
+      {/if}
+      {#if pendingImages()}
+        <p class="warn">{pendingImages()} cartas usan imágenes que no están en la carpeta: vuelve al paso «Imágenes».</p>
+      {/if}
+      {@render reviewPanel()}
+      <div class="create">
+        {#if writable}
+          <button class="primary big" disabled={!!busy} onclick={applyToProject}>Aplicar a «{start.source.label}»</button>
+        {:else}
+          <p class="hint">Este proyecto no se puede escribir (no está abierto desde una carpeta en Chrome o Edge). Crea uno nuevo con los cambios:</p>
+          {#if window.showDirectoryPicker}<button class="primary" disabled={!!busy} onclick={createInFolder}>Guardar en una carpeta…</button>{/if}
+          <button disabled={!!busy} onclick={createZip}>Descargar .zip</button>
+          <button class="ghost" disabled={!!busy} onclick={tryIt}>Probar sin guardar</button>
+        {/if}
+      </div>
+      {#if busy}<p class="hint">{busy}</p>{/if}
     {:else}
       <h2>Crear el proyecto</h2>
       <ul class="summary">
@@ -1176,6 +1608,7 @@
       {#if pendingImages()}
         <p class="warn">{pendingImages()} cartas usan imágenes que no están cargadas: vuelve al paso «Imágenes» y elige la carpeta.</p>
       {/if}
+      {@render reviewPanel()}
       <p class="lead">
         Se crea la carpeta del proyecto con tu tabla de cartas y tus imágenes; lo que falte se rellena con ejemplos e imágenes
         provisionales, y el panel de pendientes te dirá qué queda.
@@ -1226,6 +1659,19 @@
         <small>{previewLabel(currentType?.label)} · carta {row + 1} de {currentType?.count}</small>
         <button class="small" onclick={() => (row = Math.min((currentType?.count ?? 1) - 1, row + 1))} disabled={row >= (currentType?.count ?? 1) - 1}>▶</button>
       </div>
+      {#if cropImage && currentType}
+        <div class="crop-panel">
+          <small>Encuadre de la ilustración: arrastra para mover, la rueda amplía.</small>
+          <CropEditor
+            src={cropImage.src}
+            aspect={cropImage.aspect}
+            value={cell(currentType, row, 'encuadre')}
+            onchange={(v) => setCell(currentType, row, 'encuadre', v)}
+            width={240}
+            label="Encuadre de la ilustración"
+          />
+        </div>
+      {/if}
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
       {@render card(preview, currentType?.label ?? '', stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
@@ -1539,6 +1985,52 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .crop-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    margin-top: 8px;
+  }
+  .issues {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .ok {
+    color: #7bd88f;
+    margin: 0;
+  }
+  .link {
+    all: unset;
+    cursor: pointer;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .link:disabled {
+    color: inherit;
+    text-decoration: none;
+    cursor: default;
+  }
+  details summary {
+    cursor: pointer;
+    margin: 4px 0;
+  }
+  .fonts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .font-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .sample {
+    font-size: 20px;
   }
   .dropzone {
     border: 1px dashed var(--border);

@@ -3,7 +3,12 @@
   import { cardBlob, cardFileName, downloadBlob, type ExportFormat, type ExportOptions } from '../core/export';
   import type { LoadedProject } from '../core/project';
   import type { RenderOptions } from '../core/render';
+  import { normalizeKey } from '../core/text';
   import CardView from './CardView.svelte';
+  import { BLEED_MM, cardSizeFor } from '../core/card';
+  import { zoneAt } from '../core/pick';
+  import { templateFor } from '../core/render';
+  import type { Zone } from '../core/types';
 
   let {
     lp,
@@ -12,6 +17,8 @@
     exportOpts,
     onclose,
     onselect,
+    onedit,
+    onwizard,
   }: {
     lp: LoadedProject;
     index: number;
@@ -19,7 +26,29 @@
     exportOpts: ExportOptions;
     onclose: () => void;
     onselect: (index: number) => void;
+    /** Abrir esta zona de la plantilla en el editor. */
+    onedit?: (tipo: string, zone: string, rowId: string) => void;
+    /** Ajustar este elemento en el asistente (proyectos hechos con él). */
+    onwizard?: (tipo: string, zone: string) => void;
   } = $props();
+
+  /** Zona de la carta que se ha pulsado. */
+  let picked = $state<Zone | null>(null);
+  // Al pasar a otra carta se olvida lo pulsado.
+  $effect(() => {
+    void index;
+    picked = null;
+  });
+
+  function pick(e: MouseEvent) {
+    const el = e.currentTarget as HTMLElement;
+    const box = el.getBoundingClientRect();
+    const size = cardSizeFor(lp.project, templateFor(lp.project, row));
+    const b = detailOpts.bleed ? BLEED_MM : 0;
+    const x = ((e.clientX - box.left) / box.width) * (size.width + 2 * b) - b;
+    const y = ((e.clientY - box.top) / box.height) * (size.height + 2 * b) - b;
+    picked = zoneAt(templateFor(lp.project, row), row, opts.lang, x, y);
+  }
 
   const row = $derived(lp.rows[index]);
   const back = $derived(backRef(row, lp.project));
@@ -66,8 +95,18 @@
     <div class="content">
       <div class="faces">
         <figure>
-          <CardView {row} {lp} opts={detailOpts} onwarnings={(w) => (warnings = w)} />
-          <figcaption>Anverso</figcaption>
+          <button class="plain pick" onclick={pick} title="Pulsa un elemento de la carta para ajustarlo">
+            <CardView {row} {lp} opts={picked ? { ...detailOpts, focus: [picked.id] } : detailOpts} onwarnings={(w) => (warnings = w)} />
+          </button>
+          {#if picked}
+            <div class="picked">
+              <b>{picked.id}</b>
+              {#if onedit}<button class="small" onclick={() => onedit(normalizeKey(row.tipo ?? ''), picked!.id, row.id ?? '')}>Editar en la plantilla</button>{/if}
+              {#if onwizard}<button class="small" onclick={() => onwizard(row.tipo ?? '', picked!.id)}>Ajustar en el asistente</button>{/if}
+              <button class="ghost small" onclick={() => (picked = null)} aria-label="Cerrar">✕</button>
+            </div>
+          {/if}
+          <figcaption>Anverso · pulsa un elemento para ajustarlo</figcaption>
         </figure>
         {#if backIndex >= 0}
           <figure>
@@ -101,6 +140,21 @@
 </div>
 
 <style>
+  .pick {
+    cursor: crosshair;
+  }
+  .picked {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 6px;
+  }
+  button.small {
+    padding: 3px 10px;
+    font-size: 12px;
+  }
   .overlay {
     position: fixed;
     inset: 0;

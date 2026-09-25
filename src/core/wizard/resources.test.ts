@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeResources, encodeResources, matchByName, resourcePath, shelfOf, stem } from './resources';
+import { decodeResources, encodeResources, fontFamilyOf, matchByName, resourcePath, shelfOf, stem } from './resources';
 
 describe('recursos', () => {
   it('rutas limpias y sin pisar otras', () => {
@@ -10,6 +10,13 @@ describe('recursos', () => {
     expect(shelfOf('iconos/a.png')).toBe('iconos');
     expect(shelfOf('provisional/a.svg')).toBeNull();
     expect(stem('iconos/volar-2.png')).toBe('volar-2');
+    expect(shelfOf('fuentes/x.ttf')).toBe('fuentes');
+  });
+
+  it('nombre de familia a partir del archivo de fuente', () => {
+    expect(fontFamilyOf('EricaOne-Regular.ttf')).toBe('Erica One');
+    expect(fontFamilyOf('Cinzel-Bold.otf')).toBe('Cinzel Bold');
+    expect(fontFamilyOf('fuentes/mi_fuente.woff2')).toBe('mi fuente');
   });
 
   it('empareja por nombre sin mayúsculas, tildes ni separadores', () => {

@@ -6,9 +6,40 @@
   import { newZone, uniqueId, ZONE_LABELS } from '../core/zones';
   import Stage from './Stage.svelte';
   import ZoneProps from './ZoneProps.svelte';
+  import SimpleZone from './panels/SimpleZone.svelte';
   import type { Workspace } from './workspace.svelte';
 
-  let { ws, initialTipo = '' }: { ws: Workspace; initialTipo?: string } = $props();
+  let {
+    ws,
+    initialTipo = '',
+    initialZone = '',
+    initialRow = '',
+  }: {
+    ws: Workspace;
+    initialTipo?: string;
+    /** Zona que se abre seleccionada (por id), p. ej. al pulsarla en una carta de la galería. */
+    initialZone?: string;
+    /** Carta que se usa de vista previa (por id). */
+    initialRow?: string;
+  } = $props();
+
+  /** Sencillo: los ajustes habituales de la zona; avanzado: todas sus propiedades. */
+  const MODE_KEY = 'creador-de-cartas/editor-modo';
+  let mode = $state<'sencillo' | 'avanzado'>((() => {
+    try {
+      return localStorage.getItem(MODE_KEY) === 'avanzado' ? 'avanzado' : 'sencillo';
+    } catch {
+      return 'sencillo';
+    }
+  })());
+  function setMode(m: 'sencillo' | 'avanzado') {
+    mode = m;
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {
+      // sin almacenamiento: se recuerda solo mientras la página esté abierta
+    }
+  }
 
   const PLACEHOLDER = '__ejemplo__';
   const ZONE_TYPES: ZoneType[] = ['image', 'shape', 'text', 'attribute', 'attributes'];
@@ -22,11 +53,14 @@
   const tipo = $derived(tipos.includes(chosenTipo) ? chosenTipo : (tipos[0] ?? ''));
   const tpl = $derived(tipo ? project.templates[tipo] : undefined);
 
-  let selectedRaw = $state<number | null>(null);
+  // svelte-ignore state_referenced_locally
+  const startZone = initialZone ? (project.templates[tipo]?.zones.findIndex((z) => z.id === initialZone) ?? -1) : -1;
+  let selectedRaw = $state<number | null>(startZone >= 0 ? startZone : null);
   const selected = $derived(selectedRaw !== null && tpl && selectedRaw < tpl.zones.length ? selectedRaw : null);
 
   const rowsOfTipo = $derived(lp.rows.filter((r) => normalizeKey(r.tipo ?? '') === tipo));
-  let previewId = $state('');
+  // svelte-ignore state_referenced_locally
+  let previewId = $state(initialRow);
   const previewRow = $derived.by(() => {
     if (previewId !== PLACEHOLDER) {
       const found = rowsOfTipo.find((r) => r.id === previewId) ?? rowsOfTipo[0];
@@ -323,7 +357,15 @@
 
   <aside class="right">
     {#if tpl && selected !== null}
-      <ZoneProps {ws} {tipo} index={selected} {columns} />
+      <div class="mode" role="group" aria-label="Modo de edición">
+        <button class:active={mode === 'sencillo'} onclick={() => setMode('sencillo')}>Sencillo</button>
+        <button class:active={mode === 'avanzado'} onclick={() => setMode('avanzado')}>Avanzado</button>
+      </div>
+      {#if mode === 'sencillo'}
+        <SimpleZone {ws} {tipo} index={selected} />
+      {:else}
+        <ZoneProps {ws} {tipo} index={selected} {columns} />
+      {/if}
       <div class="row zone-actions">
         <button class="small" onclick={() => duplicateZone(selected!)}>Duplicar</button>
         <button class="small danger" onclick={() => deleteZone(selected!)}>Borrar zona</button>
@@ -630,6 +672,27 @@
     margin: 0;
     font-size: 11px;
     color: var(--accent);
+  }
+  .mode {
+    display: flex;
+    margin-bottom: 10px;
+  }
+  .mode button {
+    flex: 1;
+    border-radius: 0;
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+  .mode button:first-child {
+    border-radius: 6px 0 0 6px;
+  }
+  .mode button:last-child {
+    border-radius: 0 6px 6px 0;
+  }
+  .mode button.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
   }
   .zone-actions {
     margin-top: 12px;

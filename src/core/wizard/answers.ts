@@ -94,8 +94,22 @@ export interface Adjust {
   costCorner: 'left' | 'right';
   rounded: boolean;
   fonts: string;
+  /** Fuentes propias (nombre de familia) para títulos y para textos, en lugar de las de la combinación. */
+  titleFont?: string;
+  bodyFont?: string;
   palette: Palette;
 }
+
+/** Letra de títulos y de textos: la combinación elegida o las fuentes propias, con la combinación de reserva. */
+export function fontStackOf(adjust: Pick<Adjust, 'fonts' | 'titleFont' | 'bodyFont'>): { title: string; body: string } {
+  const pair = FONT_PAIRS[adjust.fonts] ?? FONT_PAIRS.clasica;
+  return {
+    title: adjust.titleFont ? `"${adjust.titleFont}", ${pair.title}` : pair.title,
+    body: adjust.bodyFont ? `"${adjust.bodyFont}", ${pair.body}` : pair.body,
+  };
+}
+
+export const fontStack = (a: Pick<WizardAnswers, 'adjust'>) => fontStackOf(a.adjust);
 
 /** Colores de la paleta para piezas y textos; `none` = transparente. */
 export type PieceColor = 'principal' | 'acento' | 'papel' | 'tinta' | 'none';
@@ -112,8 +126,8 @@ export interface TextStyle {
   scale?: number;
   color?: Exclude<PieceColor, 'none'>;
   align?: 'left' | 'center' | 'right' | 'justify';
-  /** Tipo de letra: la de los títulos o la de los textos. */
-  font?: 'title' | 'body';
+  /** Tipo de letra: la de los títulos, la de los textos o una fuente propia (su nombre de familia). */
+  font?: 'title' | 'body' | (string & {});
   bold?: boolean;
   italic?: boolean;
 }
@@ -183,6 +197,10 @@ export interface WizardAnswers {
   fine: FineTune;
   /** Icono propio del coste (ruta dentro de assets/). */
   costIcon?: string;
+  /** Fuentes propias subidas: nombre de familia y archivo dentro de assets/ (`fuentes/cinzel.ttf`). */
+  fonts?: { family: string; file: string }[];
+  /** Ajustes de la trasera: su dibujo (`images.background`), la banda y sus textos. */
+  backFine?: Partial<FineTune>;
 }
 
 export function defaultAnswers(): WizardAnswers {

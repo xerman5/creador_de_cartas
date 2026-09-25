@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RESOURCE_FILE, shelfOf, SHELVES, type ShelfId } from '../core/wizard/resources';
+  import { FONT_FILE, fontFamilyOf, RESOURCE_FILE, shelfOf, SHELVES, type ShelfId } from '../core/wizard/resources';
   import ResourceShelf from './ResourceShelf.svelte';
   import { thumbUrls } from './thumbs.svelte';
   import type { Workspace } from './workspace.svelte';
@@ -40,6 +40,48 @@
   async function add(files: File[], shelf: ShelfId) {
     const paths = await ws.addResources(files, shelf);
     report = paths.length ? `${paths.length} ${paths.length === 1 ? 'archivo añadido' : 'archivos añadidos'} a assets/${shelf}/.` : '';
+  }
+
+  // ---------------------------------------------------------- fuentes
+
+  const fontFiles = $derived(ws.assetFiles.filter((f) => FONT_FILE.test(f)));
+  const projectFonts = $derived(ws.lp?.project.fonts ?? []);
+  let fontInput = $state<HTMLInputElement>();
+  const shown = new Set<string>();
+
+  // Cada fuente de la carpeta se carga en la página para enseñar su muestra.
+  $effect(() => {
+    const dir = ws.lp?.project.assetsDir;
+    for (const path of fontFiles) {
+      if (shown.has(path) || !ws.source || !dir) continue;
+      shown.add(path);
+      ws.source
+        .read(`${dir}/${path}`)
+        .then((blob) => blob?.arrayBuffer())
+        .then((buf) => buf && new FontFace(`muestra:${path}`, buf).load())
+        .then((face) => face && document.fonts.add(face))
+        .catch(() => {});
+    }
+  });
+
+  async function addFonts(files: File[]) {
+    const fonts = files.filter((f) => FONT_FILE.test(f.name));
+    const paths = await ws.addResources(fonts, 'fuentes');
+    if (!paths.length) return;
+    // El nombre de familia sale del nombre original del archivo, con sus mayúsculas.
+    ws.update((p) => {
+      paths.forEach((path, i) => {
+        if (!p.fonts.some((f) => f.file === path)) p.fonts.push({ family: fontFamilyOf(fonts[i].name), file: path });
+      });
+    });
+    report = `${paths.length} ${paths.length === 1 ? 'fuente añadida' : 'fuentes añadidas'} al proyecto: úsalas por su nombre en las zonas de texto.`;
+  }
+
+  function toggleFont(path: string, on: boolean) {
+    ws.update((p) => {
+      p.fonts = p.fonts.filter((f) => f.file !== path);
+      if (on) p.fonts.push({ family: fontFamilyOf(path), file: path });
+    });
   }
 
   async function remove(path: string) {
@@ -83,6 +125,39 @@
     </section>
   {/each}
 
+  <section>
+    <h3>Fuentes <small>assets/fuentes/ · {fontFiles.length}</small></h3>
+    <p class="hint">TTF, OTF o WOFF. Las que están «en el proyecto» se cargan al abrirlo y se usan por su nombre en las zonas de texto.</p>
+    <div class="fonts">
+      {#each fontFiles as path (path)}
+        {@const pf = projectFonts.find((f) => f.file === path)}
+        <div class="font">
+          <span class="sample" style:font-family={`"muestra:${path}", sans-serif`}>Aa Bb 123</span>
+          <span class="name">{pf?.family ?? fontFamilyOf(path)}</span>
+          <label class="check"><input type="checkbox" checked={!!pf} disabled={!writable && !pf} onchange={(e) => toggleFont(path, e.currentTarget.checked)} /> En el proyecto</label>
+          {#if writable}<button class="ghost small" onclick={() => remove(path)} aria-label="Borrar {path}">✕</button>{/if}
+        </div>
+      {:else}
+        <p class="hint">Sin fuentes propias.</p>
+      {/each}
+      {#if writable}
+        <button class="small" onclick={() => fontInput?.click()}>＋ Añadir fuentes…</button>
+        <input
+          type="file"
+          hidden
+          multiple
+          accept=".ttf,.otf,.woff,.woff2"
+          bind:this={fontInput}
+          onchange={(e) => {
+            const files = [...(e.currentTarget.files ?? [])];
+            e.currentTarget.value = '';
+            addFonts(files);
+          }}
+        />
+      {/if}
+    </div>
+  </section>
+
   {#if others.length}
     <section>
       <h3>Otros <small>{others.length}</small></h3>
@@ -123,6 +198,35 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .fonts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .font {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+  .sample {
+    font-size: 22px;
+    min-width: 150px;
+  }
+  .name {
+    min-width: 140px;
+    color: var(--muted);
+  }
+  .check {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-size: 13px;
+  }
+  button.small {
+    padding: 2px 10px;
+    font-size: 12px;
   }
   .report {
     background: #1d3355;

@@ -12,7 +12,7 @@ export interface TableColumn {
   header: string;
   label: string;
   /** `flag`: habilidad, la carta la tiene («x») o no (vacío). */
-  kind: 'id' | 'text' | 'long' | 'number' | 'flag' | 'variant' | 'image';
+  kind: 'id' | 'text' | 'long' | 'number' | 'flag' | 'variant' | 'image' | 'crop';
 }
 
 const TEXT_FIELDS = [
@@ -45,7 +45,11 @@ export function tableColumns(a: WizardAnswers, types: TypeAnswer[], lang?: strin
     }
   }
   if (has('variant')) cols.push({ key: 'variante', header: normalizeKey(a.variant.column || 'rareza'), label: a.variant.column || 'Rareza', kind: 'variant' });
-  if (has('art')) cols.push({ key: 'ilustracion', header: 'ilustracion', label: 'Ilustración', kind: 'image' });
+  if (has('art')) {
+    cols.push({ key: 'ilustracion', header: 'ilustracion', label: 'Ilustración', kind: 'image' });
+    // El encuadre se ajusta arrastrando la imagen, no escribiendo: va en el CSV pero no en la tabla.
+    cols.push({ key: 'encuadre', header: 'encuadre', label: 'Encuadre', kind: 'crop' });
+  }
   cols.push({ key: 'copias', header: 'copias', label: 'Copias', kind: 'number' });
   return cols;
 }
@@ -124,6 +128,7 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
     else if (attrKeys.has(header)) mapping.set(header, (d, v) => setAttr(d, header, v));
     else if (header === variantCol || VARIANT_NAMES.includes(header)) mapping.set(header, (d, v) => (d.variante = v));
     else if (base === 'ilustracion') mapping.set(header, (d, v) => (d.ilustracion = v));
+    else if (header === 'encuadre') mapping.set(header, (d, v) => (d.encuadre = v));
     else if (header === 'copias') mapping.set(header, (d, v) => (d.copias = v));
     else if (!SILENT.has(header)) report.ignored.push(header);
   }
@@ -144,6 +149,13 @@ export function importCsv(a: WizardAnswers, text: string, fallbackType = 0): { t
     for (const [header, apply] of mapping) {
       const v = (row[header] ?? '').trim();
       if (v && !isPlaceholder(v)) apply(data, v);
+    }
+    // Lo que el asistente pone de relleno («Criatura 3», el nombre del tipo como línea de tipo) no es un dato.
+    const label = a.types[index].label.trim();
+    const numbered = new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\d+$`);
+    for (const l of langs) {
+      if (numbered.test(data[textKey('titulo', l, langs)] ?? '')) delete data[textKey('titulo', l, langs)];
+      if (data[textKey('subtipo', l, langs)] === label) delete data[textKey('subtipo', l, langs)];
     }
     incoming.set(index, [...(incoming.get(index) ?? []), data]);
   }

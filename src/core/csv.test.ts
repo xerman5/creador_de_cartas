@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectLangs, parseCsv } from './csv';
+import { detectLangs, parseCsv, serializeCsv } from './csv';
 
 describe('parseCsv', () => {
   it('normaliza cabeceras y conserva los valores', () => {
@@ -28,5 +28,19 @@ describe('parseCsv', () => {
 describe('detectLangs', () => {
   it('deduce los idiomas de los sufijos', () => {
     expect(detectLangs(['id', 'titulo-es', 'titulo-en', 'descripcion-es', 'bloque 1'])).toEqual(['es', 'en']);
+  });
+});
+
+describe('serializeCsv', () => {
+  it('vuelve a escribir el archivo con sus cabeceras, separador, saltos y BOM', () => {
+    const text = '﻿Id;Tipo;Título-ES\r\nA1;carta;Hola; mundo\r\n';
+    const fixed = '﻿Id;Tipo;Título-ES\r\nA1;carta;"Hola; mundo"\r\n';
+    const csv = parseCsv(fixed);
+    expect(csv.format).toEqual({ delimiter: ';', headers: ['Id', 'Tipo', 'Título-ES'], newline: '\r\n', bom: true });
+    expect(serializeCsv(csv.rows, csv.columns, csv.format)).toBe(fixed);
+    // Una columna nueva usa su clave como cabecera.
+    const rows = csv.rows.map((r) => ({ ...r, notas: 'x' }));
+    expect(serializeCsv(rows, [...csv.columns, 'notas'], csv.format)).toBe('﻿Id;Tipo;Título-ES;notas\r\nA1;carta;"Hola; mundo";x\r\n');
+    expect(parseCsv(text).rows[0]['titulo-es']).toBe('Hola');
   });
 });
