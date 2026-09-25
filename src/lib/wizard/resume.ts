@@ -3,7 +3,7 @@ import { readText } from '../../core/text';
 import type { Project } from '../../core/types';
 import type { WizardAnswers } from '../../core/wizard/answers';
 import { IMAGES_DIR } from '../../core/wizard/images';
-import { RESOURCE_FILE, shelfOf, type Resources } from '../../core/wizard/resources';
+import { FONT_FILE, RESOURCE_FILE, shelfOf, type Resources } from '../../core/wizard/resources';
 import { parseWizardFile, resumeAnswers, WIZARD_FILE, type WizardFile } from '../../core/wizard/sync';
 
 /** Todo lo que necesita el asistente para seguir trabajando sobre un proyecto ya creado. */
@@ -34,10 +34,10 @@ export async function loadResume(source: FileSource, project: Project): Promise<
 
   const resources: Resources = new Map();
   const images = new Map<string, Blob>();
-  const paths = ((await source.list?.(project.assetsDir)) ?? []).filter((p) => RESOURCE_FILE.test(p));
+  const paths = ((await source.list?.(project.assetsDir)) ?? []).filter((p) => RESOURCE_FILE.test(p) || FONT_FILE.test(p));
   for (const path of paths) {
     const shelf = shelfOf(path);
-    if (shelf !== 'iconos' && shelf !== 'fondos' && shelf !== 'ilustraciones') continue;
+    if (!shelf) continue;
     const data = await source.read(`${project.assetsDir}/${path}`);
     if (!data) continue;
     if (shelf === 'ilustraciones') images.set(path.slice(IMAGES_DIR.length + 1), data);

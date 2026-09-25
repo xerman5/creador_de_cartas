@@ -1,5 +1,5 @@
 import type { AttributeZone, AttributesZone, CardSize, FontSpec, ImageZone, Rect, ShapeZone, TextZone, Zone } from '../types';
-import { FONT_PAIRS, fileKey, type Adjust, type DesignId, type ElementKey } from './answers';
+import { fileKey, fontStackOf, type Adjust, type DesignId, type ElementKey } from './answers';
 
 export interface LayoutInput {
   design: DesignId;
@@ -82,9 +82,9 @@ class Layout {
     this.has = (e) => (e === 'stats' ? inp.elements.has('stats') && inp.statKeys.length > 0 : inp.elements.has(e));
     this.hasAb = inp.elements.has('stats') && (inp.abilityKeys?.length ?? 0) > 0;
     this.abH = 6.5 * this.f;
-    const pair = FONT_PAIRS[inp.adjust.fonts] ?? FONT_PAIRS.clasica;
-    this.titleFont = pair.title;
-    this.bodyFont = pair.body;
+    const fonts = fontStackOf(inp.adjust);
+    this.titleFont = fonts.title;
+    this.bodyFont = fonts.body;
   }
 
   // ------------------------------------------------------------ piezas

@@ -3,7 +3,7 @@ import { downloadBlob } from '../core/export';
 import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../core/project';
 import { detectLangs, serializeCsv } from '../core/csv';
 import type { CardRow, Project } from '../core/types';
-import { resourcePath, type ShelfId } from '../core/wizard/resources';
+import { resourcePath, type ResourceDir } from '../core/wizard/resources';
 import { WIZARD_FILE } from '../core/wizard/sync';
 
 const HISTORY_LIMIT = 200;
@@ -192,7 +192,7 @@ export class Workspace {
   }
 
   /** Añade archivos a un estante de la biblioteca sin pisar los que ya hay; devuelve sus rutas. */
-  async addResources(files: File[], shelf: ShelfId): Promise<string[]> {
+  async addResources(files: File[], shelf: ResourceDir): Promise<string[]> {
     const lp = this.lp;
     if (!lp || !this.source?.write) return [];
     const taken = new Set(this.assetFiles);

@@ -17,6 +17,10 @@ test('biblioteca del editor: estantes, elegir un icono y soltar una imagen en un
   await page.locator('.resources section').nth(1).locator('input[type=file]').setInputFiles(fixture('fondos', 'pergamino.png'));
   await expect(page.locator('.resources section').nth(1).locator('.item small')).toHaveText(['pergamino-2', 'pergamino']);
   await expect(page.locator('.resources section').nth(1)).toContainText('Sin usar: pergamino-2.png, pergamino.png');
+  // Fuentes: se añaden al proyecto con su nombre de familia.
+  await page.locator('input[accept=".ttf,.otf,.woff,.woff2"]').setInputFiles(fixture('fuentes', 'EricaOne-Regular.ttf'));
+  await expect(page.locator('.resources .font .name')).toHaveText('Erica One');
+  await expect(page.locator('.resources .font').getByRole('checkbox', { name: 'En el proyecto' })).toBeChecked();
 
   // Proyecto › Atributos: el hueco del icono abre la biblioteca.
   await page.getByRole('button', { name: '1 · Proyecto' }).click();
@@ -39,6 +43,7 @@ test('biblioteca del editor: estantes, elegir un icono y soltar una imagen en un
   await expect(page.locator('aside input[list^="assets-"]').first()).toHaveValue('fondos/pergamino.png');
   await page.keyboard.press('Control+s');
   await expect.poll(async () => (await readFolderFile(page, 'biblioteca', 'proyecto.json')) ?? '').toContain('fondos/pergamino.png');
+  expect(JSON.parse((await readFolderFile(page, 'biblioteca', 'proyecto.json'))!).fonts).toEqual([{ family: 'Erica One', file: 'fuentes/ericaone-regular.ttf' }]);
 
   expect(errors).toEqual([]);
 });

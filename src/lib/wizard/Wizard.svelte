@@ -1,7 +1,9 @@
 <script lang="ts">
   import { DirectorySource, MemorySource, type FileSource } from '../../core/assets';
   import { downloadBlob, saveZip, slug } from '../../core/export';
-  import { PROJECT_FILE, serializeProject, type LoadedProject } from '../../core/project';
+  import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../../core/project';
+  import { pendingItems, type PendingItem } from '../../core/pending';
+  import { renderCard } from '../../core/render';
   import { applyAll, handEdited, newWizardFile, WIZARD_FILE, wizardFileJson } from '../../core/wizard/sync';
   import type { ResumeContext } from './resume';
   import type { RenderOptions } from '../../core/render';
@@ -14,6 +16,7 @@
     ELEMENTS,
     flagOn,
     FONT_PAIRS,
+    fontStack,
     isAbility,
     PALETTES,
     resolvedType,
@@ -25,11 +28,24 @@
     type WizardAnswers,
   } from '../../core/wizard/answers';
   import { buildProject, cardIds, costSvg, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles, provisionalIcon } from '../../core/wizard/build';
-  import { matchByName, resourceFiles, resourcePath, shelfOf, type Resources, type ShelfId } from '../../core/wizard/resources';
+  import {
+    FONT_FILE,
+    fontFamilyOf,
+    matchByName,
+    resourceFiles,
+    resourcePath,
+    shelfOf,
+    type ResourceDir,
+    type Resources,
+    type ShelfId,
+  } from '../../core/wizard/resources';
   import ResourceShelf from '../ResourceShelf.svelte';
   import ResourceSlot from '../ResourceSlot.svelte';
   import { tourElements, type Library } from './tour';
   import TypeTour from './TypeTour.svelte';
+  import PieceControls from '../panels/PieceControls.svelte';
+  import TextControls from '../panels/TextControls.svelte';
+  import { cardPixels } from '../../core/card';
   import { acceptsDrop, droppedEntries } from '../drop';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
@@ -340,7 +356,7 @@
   }
 
   /** Copia archivos a un estante y devuelve sus rutas (en el mismo orden). */
-  function addResources(files: File[], shelf: ShelfId): string[] {
+  function addResources(files: File[], shelf: ResourceDir): string[] {
     const next = new Map(resources);
     const paths = files.map((f) => {
       const path = resourcePath(shelf, f.name, (p) => next.has(p));
@@ -360,6 +376,16 @@
     for (const f of [answers.fine, ...answers.types.map((t) => t.fine)]) {
       if (f?.images?.background === path) delete f.images.background;
       if (f?.images?.frame === path) delete f.images.frame;
+    }
+    if (answers.backFine?.images?.background === path) delete answers.backFine.images.background;
+    // Una fuente: deja de usarse donde estuviera elegida.
+    const font = answers.fonts?.find((x) => x.file === path);
+    if (font) {
+      answers.fonts = answers.fonts!.filter((x) => x !== font);
+      if (answers.adjust.titleFont === font.family) answers.adjust.titleFont = undefined;
+      if (answers.adjust.bodyFont === font.family) answers.adjust.bodyFont = undefined;
+      for (const f of [answers.fine, ...answers.types.map((t) => t.fine)])
+        for (const st of Object.values(f?.texts ?? {})) if (st.font === font.family) delete st.font;
     }
   }
 
@@ -384,6 +410,38 @@
     picking = null;
   }
 
+  // ------------------------------------------------------------ fuentes propias
+
+  let fontInput = $state<HTMLInputElement>();
+  let fontOver = $state(false);
+  /** Fuentes ya cargadas en la página (para enseñar su muestra). */
+  const loadedFonts = new Set<string>();
+
+  function addFonts(files: File[]) {
+    const fonts = files.filter((f) => FONT_FILE.test(f.name));
+    const paths = addResources(fonts, 'fuentes');
+    const list = (answers.fonts ??= []);
+    fonts.forEach((f, i) => {
+      let family = fontFamilyOf(f.name);
+      for (let n = 2; list.some((x) => x.family === family); n++) family = `${fontFamilyOf(f.name)} ${n}`;
+      answers.fonts!.push({ family, file: paths[i] });
+    });
+  }
+
+  $effect(() => {
+    for (const fnt of answers.fonts ?? []) {
+      const blob = resources.get(fnt.file);
+      const key = `${fnt.family}|${fnt.file}`;
+      if (!blob || loadedFonts.has(key)) continue;
+      loadedFonts.add(key);
+      blob
+        .arrayBuffer()
+        .then((buf) => new FontFace(fnt.family, buf).load())
+        .then((face) => document.fonts.add(face))
+        .catch(() => (error = `No se pudo leer la fuente «${fnt.file}».`));
+    }
+  });
+
   /** Iconos nuevos: los que se llaman como un atributo sin icono propio se le asignan solos. */
   function addIcons(files: File[]) {
     const paths = addResources(files, 'iconos');
@@ -401,6 +459,28 @@
     iconReport =
       `${files.length} ${files.length === 1 ? 'icono añadido' : 'iconos añadidos'}` +
       (matched.size ? `; puestos por su nombre: ${[...matched.keys()].join(', ')}.` : '. Arrástralos a cada atributo o haz clic en su icono.');
+  }
+
+  // ------------------------------------------------------------ trasera
+
+  const backZones = $derived(preview?.project.templates.trasera?.zones ?? []);
+  const backPx = $derived(cardPixels({ width: answers.size.width, height: answers.size.height }, 300));
+  let pickingBack = $state(false);
+
+  /** El ajuste de una pieza o un texto de la trasera, creándolo si hace falta. */
+  function backStyle(kind: 'pieces' | 'texts', id: string): Record<string, unknown> {
+    answers.backFine ??= {};
+    answers.backFine[kind] ??= {};
+    answers.backFine[kind]![id] ??= {};
+    return answers.backFine[kind]![id] as Record<string, unknown>;
+  }
+
+  function setBackImage(path: string | undefined) {
+    answers.backFine ??= {};
+    answers.backFine.images ??= {};
+    if (path) answers.backFine.images.background = path;
+    else delete answers.backFine.images.background;
+    pickingBack = false;
   }
 
   // ------------------------------------------------------------ recorrido tipo a tipo
@@ -621,6 +701,50 @@
     };
   }
 
+  // ------------------------------------------------------------ repaso final
+
+  interface Review {
+    done: number;
+    total: number;
+    /** Avisos de cada carta que los tiene (texto que no cabe, imagen que falta…). */
+    cards: { id: string; type: number; index: number; warnings: string[] }[];
+    pending: PendingItem[];
+  }
+  let review = $state<Review | null>(null);
+
+  /** Al llegar a «Crear», se dibujan todas las cartas en pequeño para ver qué falla antes de crear. */
+  $effect(() => {
+    if (stepId !== 'crear') return;
+    const all = files();
+    const snap = $state.snapshot(answers) as WizardAnswers;
+    let cancelled = false;
+    (async () => {
+      const lp = await loadProject(new MemorySource('repaso', all));
+      const r: Review = { done: 0, total: lp.rows.length, cards: [], pending: pendingItems(lp) };
+      review = r;
+      const counters = new Map<string, number>();
+      for (const row of lp.rows) {
+        if (cancelled) break;
+        const type = snap.types.findIndex((t) => typeKey(t) === normalizeKey(row.tipo ?? ''));
+        const index = counters.get(row.tipo ?? '') ?? 0;
+        counters.set(row.tipo ?? '', index + 1);
+        const { warnings } = await renderCard(row, lp, { dpi: 30, lang: lp.langs[0] ?? '', bleed: false });
+        r.done++;
+        if (warnings.length) r.cards.push({ id: row.id ?? '', type, index, warnings: [...new Set(warnings)] });
+        if (r.done % 8 === 0 || r.done === r.total) review = { ...r, cards: [...r.cards] };
+      }
+      lp.assets.dispose();
+    })();
+    return () => (cancelled = true);
+  });
+
+  function goToCard(type: number, index: number) {
+    if (type < 0) return;
+    current = type;
+    row = index;
+    go(stepIndex('cartas'));
+  }
+
   // ------------------------------------------------------------ retomar un proyecto
 
   const writable = !!start?.source.write;
@@ -719,6 +843,39 @@
   {:else}
     <div class="placeholder">Dibujando…</div>
   {/if}
+{/snippet}
+
+{#snippet reviewPanel()}
+  <div class="field review">
+    <span>Repaso</span>
+    {#if !review}
+      <p class="hint">Preparando…</p>
+    {:else}
+      {#if review.done < review.total}
+        <p class="hint">Revisando las cartas: {review.done} de {review.total}…</p>
+      {:else if !review.cards.length && !review.pending.length}
+        <p class="ok">Todo en orden: {review.total} cartas revisadas, sin avisos ni nada pendiente.</p>
+      {:else}
+        <p class="hint">{review.total} cartas revisadas.</p>
+      {/if}
+      {#if review.cards.length}
+        <ul class="issues">
+          {#each review.cards.slice(0, 30) as c}
+            <li>
+              <button class="link" onclick={() => goToCard(c.type, c.index)} disabled={c.type < 0}>{c.id || `carta ${c.index + 1}`}</button>: {c.warnings.join('; ')}
+            </li>
+          {/each}
+          {#if review.cards.length > 30}<li>… y {review.cards.length - 30} más.</li>{/if}
+        </ul>
+      {/if}
+      {#if review.pending.length}
+        <p class="hint">Pendiente (se rellena con ejemplos y podrás terminarlo después):</p>
+        <ul class="issues">
+          {#each review.pending as it}<li>{it.label}</li>{/each}
+        </ul>
+      {/if}
+    {/if}
+  </div>
 {/snippet}
 
 {#snippet typeTabs()}
@@ -1070,6 +1227,67 @@
             </button>
           {/each}
         </div>
+        <div
+          class="fonts dropzone"
+          class:over={fontOver}
+          role="region"
+          aria-label="Tus fuentes"
+          ondragover={(e) => {
+            if (acceptsDrop(e)) {
+              e.preventDefault();
+              fontOver = true;
+            }
+          }}
+          ondragleave={() => (fontOver = false)}
+          ondrop={async (e) => {
+            fontOver = false;
+            e.preventDefault();
+            const files = [...(e.dataTransfer?.files ?? [])].filter((f) => FONT_FILE.test(f.name));
+            if (files.length) addFonts(files);
+          }}
+        >
+          <b>Tus fuentes</b>
+          {#each answers.fonts ?? [] as fnt}
+            <div class="font-row">
+              <span class="sample" style:font-family={`"${fnt.family}", sans-serif`}>Aa Bb 123 — {fnt.family}</span>
+              <button class="ghost small" onclick={() => removeResource(fnt.file)} title="Quitar" aria-label="Quitar {fnt.family}">✕</button>
+            </div>
+          {:else}
+            <p class="hint">Suelta aquí archivos TTF, OTF o WOFF (o elígelos) para usar tus propias fuentes. Revisa que su licencia permita usarlas en tu juego.</p>
+          {/each}
+          <div class="row">
+            <button class="small" onclick={() => fontInput?.click()}>＋ Añadir fuentes…</button>
+            {#if answers.fonts?.length}
+              <label class="inline">
+                Títulos con
+                <select bind:value={answers.adjust.titleFont} aria-label="Fuente de los títulos">
+                  <option value={undefined}>la de la combinación</option>
+                  {#each answers.fonts as fnt}<option value={fnt.family}>{fnt.family}</option>{/each}
+                </select>
+              </label>
+              <label class="inline">
+                Textos con
+                <select bind:value={answers.adjust.bodyFont} aria-label="Fuente de los textos">
+                  <option value={undefined}>la de la combinación</option>
+                  {#each answers.fonts as fnt}<option value={fnt.family}>{fnt.family}</option>{/each}
+                </select>
+              </label>
+            {/if}
+          </div>
+          <input
+            type="file"
+            hidden
+            multiple
+            accept=".ttf,.otf,.woff,.woff2"
+            bind:this={fontInput}
+            onchange={(e) => {
+              const files = [...(e.currentTarget.files ?? [])];
+              e.currentTarget.value = '';
+              if (files.length) addFonts(files);
+            }}
+          />
+        </div>
+        <p class="hint">En el recorrido «Tipo a tipo» puedes elegir la fuente de cada texto por separado.</p>
       </div>
       {#if uses('art') && (uses('rules') || uses('flavor'))}
         <label class="field">
@@ -1138,6 +1356,64 @@
           </button>
         {/each}
       </div>
+      {#if answers.backs !== 'none'}
+        {@const bz = (id: string) => backZones.find((z) => z.id === id)}
+        {@const bf = answers.backFine ?? {}}
+        <div class="field">
+          <span>Dibujo del dorso</span>
+          <div class="row">
+            <ResourceSlot
+              url={bf.images?.background ? resourceUrls.get(bf.images.background) : undefined}
+              label="Dibujo del dorso"
+              custom={!!bf.images?.background}
+              active={pickingBack}
+              size={56}
+              onclick={() => (pickingBack = !pickingBack)}
+              onfile={(f) => setBackImage(addResources([f], 'fondos')[0])}
+              onpath={(p) => setBackImage(p)}
+            />
+            <p class="hint">
+              Una imagen para todo el dorso, con sangrado (por ejemplo, {backPx.width} × {backPx.height} px a 300 ppp). Sin ella se usa un
+              dibujo provisional.
+              {#if bf.images?.background}<button class="ghost small" onclick={() => setBackImage(undefined)}>Volver al provisional</button>{/if}
+            </p>
+          </div>
+          {#if pickingBack}
+            <ResourceShelf
+              compact
+              items={shelfItems('fondos')}
+              selected={bf.images?.background ?? ''}
+              onpick={(p) => setBackImage(p)}
+              onadd={(files) => setBackImage(addResources(files, 'fondos')[0])}
+              onremove={removeResource}
+              empty="Sin fondos: suelta aquí la imagen del dorso."
+            />
+          {/if}
+        </div>
+        <div class="field">
+          <span>Banda y textos</span>
+          {#if bz('banda')?.type === 'shape'}
+            <PieceControls zone={bz('banda') as never} style={bf.pieces?.banda ?? {}} label="Banda" palette={answers.adjust.palette} onchange={(p) => Object.assign(backStyle('pieces', 'banda'), p)} />
+          {/if}
+          {#each [['nombre', 'Nombre del juego'], ['tipo', 'Nombre del tipo']] as [id, label]}
+            {#if bz(id)?.type === 'text'}
+              <details>
+                <summary>{label}</summary>
+                <TextControls
+                  zone={bz(id) as never}
+                  style={bf.texts?.[id] ?? {}}
+                  {label}
+                  palette={answers.adjust.palette}
+                  fonts={fontStack(answers)}
+                  custom={(answers.fonts ?? []).map((x) => x.family)}
+                  onchange={(p) => Object.assign(backStyle('texts', id), p)}
+                />
+              </details>
+            {/if}
+          {/each}
+          <p class="hint">Con un dibujo propio que ya lleve el nombre, puedes dejar la banda transparente y sin borde.</p>
+        </div>
+      {/if}
     {:else if stepId === 'cartas'}
       <h2>Las cartas</h2>
       <p class="lead">
@@ -1299,6 +1575,7 @@
       {#if pendingImages()}
         <p class="warn">{pendingImages()} cartas usan imágenes que no están en la carpeta: vuelve al paso «Imágenes».</p>
       {/if}
+      {@render reviewPanel()}
       <div class="create">
         {#if writable}
           <button class="primary big" disabled={!!busy} onclick={applyToProject}>Aplicar a «{start.source.label}»</button>
@@ -1322,6 +1599,7 @@
       {#if pendingImages()}
         <p class="warn">{pendingImages()} cartas usan imágenes que no están cargadas: vuelve al paso «Imágenes» y elige la carpeta.</p>
       {/if}
+      {@render reviewPanel()}
       <p class="lead">
         Se crea la carpeta del proyecto con tu tabla de cartas y tus imágenes; lo que falte se rellena con ejemplos e imágenes
         provisionales, y el panel de pendientes te dirá qué queda.
@@ -1705,6 +1983,45 @@
     gap: 6px;
     align-items: center;
     margin-top: 8px;
+  }
+  .issues {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .ok {
+    color: #7bd88f;
+    margin: 0;
+  }
+  .link {
+    all: unset;
+    cursor: pointer;
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .link:disabled {
+    color: inherit;
+    text-decoration: none;
+    cursor: default;
+  }
+  details summary {
+    cursor: pointer;
+    margin: 4px 0;
+  }
+  .fonts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .font-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .sample {
+    font-size: 20px;
   }
   .dropzone {
     border: 1px dashed var(--border);

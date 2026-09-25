@@ -178,6 +178,8 @@ export function applyProject(current: Project, built: Project, g: Generated | un
     attributes,
     templates,
     colors: { ...current.colors, ...built.colors },
+    // Las fuentes del asistente, más las que se añadieron a mano.
+    fonts: [...current.fonts.filter((f) => !built.fonts.some((b) => b.family === f.family)), ...built.fonts],
   };
 }
 

@@ -14,11 +14,26 @@ export type ShelfId = (typeof SHELVES)[number]['id'];
 
 export const RESOURCE_FILE = /\.(png|jpe?g|webp|gif|svg)$/i;
 
+/** Las fuentes van aparte: no son imágenes. */
+export const FONTS_DIR = 'fuentes';
+export const FONT_FILE = /\.(ttf|otf|woff2?)$/i;
+export type ResourceDir = ShelfId | typeof FONTS_DIR;
+
+/** «Cinzel-Bold.ttf» → «Cinzel Bold»: nombre de familia a partir del archivo. */
+export const fontFamilyOf = (name: string) =>
+  stem(name)
+    .replace(/[-_]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/\s+/g, ' ')
+    .replace(/ (Regular|Normal|Book)$/i, '')
+    .trim() || 'Fuente';
+
 /** Ruta dentro de assets/ → archivo. */
 export type Resources = Map<string, Blob>;
 
-export const shelfOf = (path: string): ShelfId | null => {
+export const shelfOf = (path: string): ResourceDir | null => {
   const dir = path.split('/')[0];
+  if (dir === FONTS_DIR) return FONTS_DIR;
   return SHELVES.some((s) => s.id === dir) ? (dir as ShelfId) : null;
 };
 
@@ -26,7 +41,7 @@ export const shelfOf = (path: string): ShelfId | null => {
 export const stem = (path: string) => (path.split('/').pop() ?? path).replace(/\.[^.]+$/, '');
 
 /** Ruta limpia y libre en un estante: «Mi Icono (2).PNG» → «iconos/mi-icono-2.png», o «…-2.png» si ya existe. */
-export function resourcePath(shelf: ShelfId, name: string, taken: (path: string) => boolean): string {
+export function resourcePath(shelf: ResourceDir, name: string, taken: (path: string) => boolean): string {
   const m = /^(.*?)(\.[a-z0-9]+)?$/i.exec(name.split(/[\\/]/).pop() ?? name)!;
   const base = fileKey(m[1] || 'recurso');
   const ext = (m[2] ?? '.png').toLowerCase().replace('.jpeg', '.jpg');

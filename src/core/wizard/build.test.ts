@@ -207,3 +207,23 @@ describe('ajustes por tipo, fondos y marcos', () => {
     expect(projectIssues(lp)).toEqual([]);
   });
 });
+
+describe('fuentes propias y trasera', () => {
+  it('las fuentes van al proyecto y a los textos; la trasera lleva su dibujo y sus ajustes', async () => {
+    const a = rich({ langs: ['es'] });
+    a.fonts = [{ family: 'Cinzel', file: 'fuentes/cinzel.ttf' }];
+    a.adjust.titleFont = 'Cinzel';
+    a.fine.texts = { reglas: { font: 'Cinzel' } };
+    a.backFine = { images: { background: 'fondos/dorso.png' }, pieces: { banda: { fill: 'none' } }, texts: { nombre: { color: 'papel' } } };
+    const built = buildProject(a);
+    expect(built.project.fonts).toEqual([{ family: 'Cinzel', file: 'fuentes/cinzel.ttf' }]);
+    const z = (t: string, id: string) => built.project.templates[t].zones.find((x) => x.id === id) as never as { font: { family: string }; default?: string; fill?: string };
+    expect(z('criatura', 'titulo').font.family).toMatch(/^"Cinzel", /);
+    expect(z('criatura', 'reglas').font.family).toMatch(/^"Cinzel", /);
+    expect(z('criatura', 'ambientacion').font.family).not.toMatch(/Cinzel/);
+    expect(z('trasera', 'dibujo').default).toBe('fondos/dorso.png');
+    expect(z('trasera', 'banda').fill).toBeUndefined();
+    expect(z('trasera', 'nombre').font).toMatchObject({ color: 'papel' });
+    expect(z('trasera', 'nombre').font.family).toMatch(/^"Cinzel", /);
+  });
+});
