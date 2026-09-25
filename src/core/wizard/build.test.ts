@@ -153,6 +153,21 @@ describe('iconos y habilidades', () => {
     expect(zones.find((z) => z.id === 'atributos')).toMatchObject({ keys: ['ataque', 'vida'] });
     expect(zones.find((z) => z.id === 'habilidades')).toMatchObject({ keys: ['volar'] });
   });
+
+  it('de ejemplo, la primera carta (la que se ve al diseñar) lleva todas las habilidades', async () => {
+    const a = rich({ langs: ['es'] });
+    a.attributes = [
+      { label: 'Ataque', color: '#d9534f', kind: 'icon' },
+      { label: 'Vida', color: '#4caf50', kind: 'icon' },
+    ];
+    a.types[0].attributes = ['ataque', 'vida'];
+    a.types[0].cards = [];
+    const { lp } = await load(a);
+    const rows = lp.rows.filter((r) => r.tipo === 'Criatura');
+    expect(rows[0].atributos).toMatch(/ataque \| vida/);
+    // Las demás, unas u otras.
+    expect(new Set(rows.slice(1).map((r) => r.atributos)).size).toBeGreaterThan(1);
+  });
 });
 
 describe('ajustes por tipo, fondos y marcos', () => {

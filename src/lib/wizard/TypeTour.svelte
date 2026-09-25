@@ -199,9 +199,10 @@
 
 {#snippet attrEditor(kind: 'number' | 'icon')}
   <div class="attrs">
+    <!-- Todos (con número y solo icono): al cambiar uno de clase no desaparece de la lista. -->
     {#each answers.attributes as at, i}
       {@const key = attrKey(at)}
-      {#if key && (kind === 'icon') === isAbility(at)}
+      {#if key}
         <div class="attr">
           <label class="inline" title="¿Lo lleva «{typeLabel(t)}»?">
             <input type="checkbox" checked={src.attributes.includes(key)} onchange={(e) => toggleAttr(key, e.currentTarget.checked)} aria-label="«{typeLabel(t)}» lleva {at.label}" />
@@ -226,8 +227,8 @@
     <button class="small" onclick={() => newAttr(kind)}>＋ {kind === 'icon' ? 'Habilidad' : 'Atributo'}</button>
   </div>
   <p class="hint">
-    Marca los que lleva «{typeLabel(t)}». Cambiar la clase mueve el atributo entre «Atributos» (con número) y «Habilidades» (solo icono), en
-    todos los tipos.{#if src !== t} «{typeLabel(t)}» es igual que «{typeLabel(src)}»: los cambios valen para los dos.{/if}
+    Marca los que lleva «{typeLabel(t)}». Con número van en «Atributos»; solo icono, en «Habilidades» (una fila sobre la ilustración, y
+    cada carta lleva las que marques en la tabla). La clase vale para todos los tipos.{#if src !== t} «{typeLabel(t)}» es igual que «{typeLabel(src)}»: los cambios valen para los dos.{/if}
   </p>
 {/snippet}
 

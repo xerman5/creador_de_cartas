@@ -353,8 +353,9 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       if (r.elements.has('cost')) attrs.push(`${COST_KEY}:${own('coste') || ((k - 1) % 5) + 1}`);
       if (r.elements.has('stats')) {
         r.stats.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
+        // De ejemplo, la primera carta (la que se ve al diseñar) lleva todas; las demás, unas u otras.
         r.abilities.forEach((key, j) => {
-          if (untouched ? (k + j) % 2 === 1 : flagOn(own(`attr:${key}`))) attrs.push(key);
+          if (untouched ? k === 1 || (k + j) % 2 === 1 : flagOn(own(`attr:${key}`))) attrs.push(key);
         });
       }
       if (attrs.length) row.atributos = attrs.join(' | ');

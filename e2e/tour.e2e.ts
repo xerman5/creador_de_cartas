@@ -33,7 +33,9 @@ test('recorrido tipo a tipo: fondo y marco, ámbito por tipo, clases de atributo
   await page.getByRole('group', { name: 'Clase de Vida' }).getByRole('button', { name: 'Solo icono' }).click();
   await page.locator('.tour .els button', { hasText: 'Habilidades' }).click();
   await page.getByRole('button', { name: '＋ Habilidad' }).click();
-  await expect(page.locator('.tour .attr .name:not(.off)')).toHaveText(['Vida', 'Sigilo']);
+  // Se ven todos (Ataque sigue con número): cambiar uno de clase no lo hace desaparecer de la lista.
+  await expect(page.locator('.tour .attr .name:not(.off)')).toHaveText(['Ataque', 'Vida', 'Sigilo']);
+  await expect(page.getByRole('group', { name: 'Clase de Sigilo' }).getByRole('button', { name: 'Solo icono' })).toHaveClass(/active/);
   await page.getByLabel(/Escribir el nombre/).check();
 
   // Añadir la línea de tipo y quitar el número de colección desde el recorrido.
