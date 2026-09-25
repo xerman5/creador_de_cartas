@@ -1,25 +1,32 @@
 <script lang="ts">
+  import { RESOURCE_FILE, shelfOf, SHELVES, type ShelfId } from '../core/wizard/resources';
+  import ResourceShelf from './ResourceShelf.svelte';
+  import ResourceSlot from './ResourceSlot.svelte';
+  import { thumbUrls } from './thumbs.svelte';
   import type { Workspace } from './workspace.svelte';
 
   let {
     ws,
     value,
     onchange,
-    subdir = '',
+    subdir = 'iconos',
     placeholder = 'ruta dentro de assets/',
   }: {
     ws: Workspace;
     value: string | undefined;
     onchange: (value: string) => void;
-    /** Carpeta dentro de assets/ donde se copian las imágenes subidas. */
-    subdir?: string;
+    /** Estante (carpeta dentro de assets/) donde se copian las imágenes nuevas y que se abre primero. */
+    subdir?: ShelfId;
     placeholder?: string;
   } = $props();
 
   const listId = `assets-${Math.random().toString(36).slice(2)}`;
-  const images = $derived(ws.assetFiles.filter((f) => /\.(png|jpe?g|svg|webp|gif)$/i.test(f)));
+  const images = $derived(ws.assetFiles.filter((f) => RESOURCE_FILE.test(f)));
+  const writable = $derived(!!ws.source?.write);
   let thumb = $state('');
-  let fileInput = $state<HTMLInputElement>();
+  let open = $state(false);
+  let shelf = $state<ShelfId | null>(null);
+  const current = $derived<ShelfId>(shelf ?? subdir);
 
   $effect(() => {
     const path = value;
@@ -27,19 +34,30 @@
     else ws.lp?.assets.image(path).then((img) => path === value && (thumb = img?.src ?? ''));
   });
 
-  async function upload() {
-    const file = fileInput?.files?.[0];
-    if (fileInput) fileInput.value = '';
-    if (!file) return;
-    const path = await ws.importAsset(file, subdir);
-    if (path) onchange(path);
+  const assets = $derived(ws.lp?.assets);
+  const shelfPaths = $derived(open ? images.filter((p) => shelfOf(p) === current) : []);
+  const thumbs = thumbUrls(() => ({ assets, paths: shelfPaths }));
+
+  async function add(files: File[], to: ShelfId) {
+    const [path] = await ws.addResources(files, to);
+    if (path) {
+      onchange(path);
+      open = false;
+    }
   }
 </script>
 
 <div class="asset">
-  <span class="thumb" class:missing={value && !thumb}>
-    {#if thumb}<img src={thumb} alt="" />{:else if value}?{/if}
-  </span>
+  <ResourceSlot
+    url={thumb || undefined}
+    label={value || 'imagen'}
+    custom={!!value}
+    active={open}
+    size={28}
+    onclick={() => (open = !open)}
+    onfile={(f) => writable && add([f], subdir)}
+    onpath={(p) => onchange(p)}
+  />
   <input
     type="text"
     list={listId}
@@ -47,14 +65,33 @@
     value={value ?? ''}
     onchange={(e) => onchange(e.currentTarget.value.trim())}
   />
-  {#if ws.source?.write}
-    <button class="ghost" title="Copiar una imagen a assets/{subdir}" onclick={() => fileInput?.click()}>↥</button>
-    <input type="file" accept="image/*" hidden bind:this={fileInput} onchange={upload} />
-  {/if}
   <datalist id={listId}>
     {#each images as f}<option value={f}></option>{/each}
   </datalist>
 </div>
+{#if open}
+  <div class="picker">
+    <div class="tabs">
+      {#each SHELVES as s}
+        <button class:active={current === s.id} onclick={() => (shelf = s.id)}>{s.label}</button>
+      {/each}
+      <span class="grow"></span>
+      {#if value}<button class="ghost" onclick={() => { onchange(''); open = false; }}>Quitar</button>{/if}
+      <button class="ghost" onclick={() => (open = false)} aria-label="Cerrar">✕</button>
+    </div>
+    <ResourceShelf
+      compact
+      items={shelfPaths.map((path) => ({ path, url: thumbs.urls.get(path) ?? '' })).filter((it) => it.url)}
+      selected={value ?? ''}
+      onpick={(p) => {
+        onchange(p);
+        open = false;
+      }}
+      onadd={writable ? (files) => add(files, current) : undefined}
+      empty={writable ? 'Vacío: suelta aquí una imagen o pulsa «Añadir».' : 'Vacío.'}
+    />
+  </div>
+{/if}
 
 <style>
   .asset {
@@ -67,26 +104,28 @@
     flex: 1;
     min-width: 0;
   }
-  .thumb {
-    flex: none;
-    width: 26px;
-    height: 26px;
-    border-radius: 4px;
-    background: #2b2f38 repeating-conic-gradient(#343945 0 25%, transparent 0 50%) 0 0 / 8px 8px;
-    display: grid;
-    place-items: center;
-    overflow: hidden;
-    color: var(--warn);
-    font-weight: bold;
+  .picker {
+    margin: 6px 0 4px;
+    padding: 6px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
   }
-  .thumb.missing {
-    outline: 1px solid var(--warn);
+  .tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 6px;
+    align-items: center;
   }
-  .thumb img {
-    max-width: 100%;
-    max-height: 100%;
+  .tabs button {
+    padding: 2px 8px;
+    font-size: 12px;
   }
-  button {
-    padding: 4px 8px;
+  .tabs button.active {
+    background: #2f3440;
+    border-color: var(--accent);
+  }
+  .grow {
+    flex: 1;
   }
 </style>

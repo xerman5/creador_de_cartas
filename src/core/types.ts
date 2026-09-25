@@ -77,6 +77,12 @@ export interface AttributesZone extends ZoneBase {
   gap?: Mm;
   iconSize: Mm;
   valuePosition?: 'over' | 'after' | 'below';
+  /** Sin valor, escribir el nombre del atributo junto al icono («Volar»). */
+  labels?: boolean;
+  /** Fondo redondeado detrás de cada icono (color o nombre de la paleta), para que se lea sobre la ilustración. */
+  backdrop?: string;
+  /** 0–1. */
+  backdropOpacity?: number;
   font: FontSpec;
 }
 

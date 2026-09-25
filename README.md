@@ -18,17 +18,23 @@ Cada push a `main` se publica en GitHub Pages (`.github/workflows/pages.yml`; ha
 
 1. **Tu juego**: nombre, tamaño de carta e idiomas.
 2. **Tipos de carta** y cuántas de cada uno.
-3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos, rareza/clan/facción, número de colección. Un tipo puede ser «igual que» otro.
-4. **Atributos y rareza**: nombre y color de cada atributo (números con icono), su orden en la carta (↑ ↓), cuáles lleva cada tipo (tabla de casillas), valores de la rareza, clan o facción.
+3. **Qué lleva cada carta**: ilustración, línea de tipo, reglas, ambientación, coste, atributos y habilidades, rareza/clan/facción, número de colección. Un tipo puede ser «igual que» otro.
+4. **Atributos y rareza**: cada atributo es **con número** (Ataque 3) o **solo icono** (Volar: una habilidad que la carta tiene o no); su orden en la carta (↑ ↓), cuáles lleva cada tipo (tabla de casillas) y su **icono**: se sueltan los PNG/SVG (o una carpeta) en «Tus iconos» y los que se llaman como un atributo se ponen solos (`volar.png` → Volar); los demás se arrastran al atributo o se eligen con un clic. Sin icono propio se usa uno provisional de su color. También el icono del coste y los valores de la rareza, clan o facción.
 5. **Diseño**: cuatro diseños base (clásico, ilustración completa, retrato, texto) dibujados con tu contenido.
 6. **Ajustes**: paleta, tipografía, tamaño de la ilustración, lado de los atributos, esquina del coste, esquinas redondeadas.
-7. **Ajuste fino** (opcional): color o transparencia, opacidad y borde de cada pieza (fondo, bandas, caja de texto, placa…), color, tamaño y alineación de cada texto (por defecto, centrados), alto de la caja de texto. Se pueden señalar las piezas sobre la carta.
+7. **Tipo a tipo**: recorre cada tipo elemento por elemento, con ese elemento resaltado en la carta. Cada cambio vale para **todos los tipos** o **solo para ese tipo** (los ajustes propios se marcan con • y se pueden quitar). Lo que no se toca se queda como en el diseño; «Saltar el resto del recorrido» sigue adelante.
+   - **Fondo y marco**: color del fondo, **imagen de fondo** (debajo de todo) y **marco** (PNG con transparencia, encima de la ilustración y debajo de los textos), sacados del estante «Fondos».
+   - **Ilustración**: tamaño y marco. **Título**, **Línea de tipo**, **Reglas**, **Ambientación**, **Número**: color, alineación (por defecto centrados), tamaño, letra (la de títulos o la de textos), negrita, cursiva, y la banda o caja que los lleva (color, transparencia, borde; alto de la caja de reglas).
+   - **Atributos**: posición, dónde va el número (encima, al lado, debajo), tamaño de los iconos, qué atributos lleva el tipo y si cada uno es con número o solo icono.
+   - **Habilidades**: fila de iconos sin número, sobre la ilustración (o en su propia fila si no hay): nombre escrito junto al icono, fondo del icono, alineación, tamaño y cuáles puede tener el tipo.
+   - **Coste** (esquina, tamaño, icono) y **Rareza** (tamaño de la marca, colores de sus valores).
+   - Se pueden **añadir o quitar elementos** del tipo desde el propio recorrido.
 8. **Traseras**: una para todas, una por tipo o ninguna.
-9. **Cartas**: la tabla de cada tipo, una fila por carta, con la carta seleccionada dibujada al lado. Se puede **descargar un CSV para rellenar** (una columna por atributo, «;» para Excel) e **importar un CSV** (ese mismo, el del proyecto o uno propio: reconoce `nombre`, `texto`, `imagen`, `clan`…; avisa de tipos y columnas que no encajan).
-10. **Imágenes**: elegir una carpeta y emparejarlas solas: (1) el archivo se llama como el id de la carta (`CRI-001.png`); (2) como su título (`guardian-de-ceniza.jpg`, sin importar mayúsculas, tildes ni espacios); (3) opcional: las demás por orden alfabético dentro de una subcarpeta con el nombre del tipo (`criatura/01.png`). Cada carta se puede corregir en la tabla. Las imágenes se copian a `assets/ilustraciones/`.
+9. **Cartas**: la tabla de cada tipo, una fila por carta, con la carta seleccionada dibujada al lado. Las habilidades son casillas (las cartas que aún no se han tocado llevan algunas de ejemplo). Se puede **descargar un CSV para rellenar** (una columna por atributo; las habilidades con `x`; «;» para Excel) e **importar un CSV** (ese mismo, el del proyecto o uno propio: reconoce `nombre`, `texto`, `imagen`, `clan`…; avisa de tipos y columnas que no encajan).
+10. **Imágenes**: elegir una carpeta (o soltarla, o soltar imágenes sueltas) y emparejarlas solas: (1) el archivo se llama como el id de la carta (`CRI-001.png`); (2) como su título (`guardian-de-ceniza.jpg`, sin importar mayúsculas, tildes ni espacios); (3) opcional: las demás por orden alfabético dentro de una subcarpeta con el nombre del tipo (`criatura/01.png`). Cada carta se puede corregir en la tabla. Las imágenes se copian a `assets/ilustraciones/`.
 11. **Crear**: en una carpeta (Chrome/Edge), como .zip o de prueba sin guardar.
 
-**Guardar progreso** descarga un `.asistente.json` con todas las respuestas y la tabla, para seguir otro día o en otro ordenador con **Cargar progreso…** (las imágenes no van en el archivo: al volver, se elige de nuevo la carpeta). Además, el borrador se guarda solo en el navegador.
+**Guardar progreso** descarga un `.asistente.json` con todas las respuestas, la tabla y los **iconos y fondos subidos**, para seguir otro día o en otro ordenador con **Cargar progreso…** (las ilustraciones no van en el archivo, porque pesan mucho: al volver, se elige de nuevo la carpeta). Además, el borrador se guarda solo en el navegador (los iconos y fondos, en IndexedDB).
 
 Lo que no se rellena usa textos de ejemplo e imágenes provisionales, y el panel **Pendiente** de la galería dice qué falta.
 
@@ -37,12 +43,13 @@ Los diseños se prueban con todas las combinaciones de elementos, tamaños y aju
 ## Flujo de trabajo
 
 1. **Proyecto**: tamaño de carta, margen de seguridad, tipos de carta, catálogo de atributos (clave + icono) y fuentes. Avisa de las columnas que las plantillas usan y el CSV no tiene.
-2. **Plantillas**: la anatomía de cada tipo. Añade zonas (imagen, texto, atributo fijo, lista de atributos) **trazando el rectángulo sobre la carta** (o con un clic, a tamaño por defecto); muévelas y redimensiónalas con imanes a bordes, centros, margen de seguridad y otras zonas. Las propiedades se editan a la derecha. Vista previa con cualquier carta del CSV o con datos de ejemplo.
-3. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json`). Solo se dibujan las miniaturas a la vista; el resto se comprueba en segundo plano para que la lista de avisos esté completa.
+2. **Recursos**: la biblioteca del proyecto en tres estantes, cada uno una carpeta de `assets/`: **Iconos** (`iconos/`), **Fondos** (`fondos/`: fondos y marcos) e **Ilustraciones** (`ilustraciones/`). Se sueltan archivos o carpetas enteras (nunca se pisa un archivo con el mismo nombre), se borran, y avisa de lo que no usa ninguna carta. Cada campo de imagen del editor tiene un hueco donde soltar un archivo o una miniatura y que, con un clic, abre la biblioteca para elegir. En Plantillas, soltar una imagen sobre una zona de imagen o de atributo la pone como su imagen por defecto o su icono.
+3. **Plantillas**: la anatomía de cada tipo. Añade zonas (imagen, texto, atributo fijo, lista de atributos) **trazando el rectángulo sobre la carta** (o con un clic, a tamaño por defecto); muévelas y redimensiónalas con imanes a bordes, centros, margen de seguridad y otras zonas. Las propiedades se editan a la derecha. Vista previa con cualquier carta del CSV o con datos de ejemplo.
+4. **Cartas**: todas las cartas generadas, avisos y exportación (PNG/JPG + `manifest.json`). Solo se dibujan las miniaturas a la vista; el resto se comprueba en segundo plano para que la lista de avisos esté completa.
 
 Guardar (⌘S) escribe `proyecto.json` en la carpeta; si el navegador no puede escribir (Safari/Firefox o el ejemplo), lo descarga. ⌘Z / ⇧⌘Z deshacen y rehacen.
 
-«Nuevo…» crea `proyecto.json` y `cartas.csv` en una carpeta (Chrome/Edge). «Abrir…» funciona en todos los navegadores; en Chrome/Edge además se puede **recargar**, activar **auto** (relee el CSV al guardarlo desde Excel) y subir imágenes a `assets/` con el botón ↥.
+«Nuevo…» crea `proyecto.json` y `cartas.csv` en una carpeta (Chrome/Edge). «Abrir…» funciona en todos los navegadores; en Chrome/Edge además se puede **recargar**, activar **auto** (relee el CSV al guardarlo desde Excel) y añadir imágenes a `assets/` desde Recursos o soltándolas en los campos de imagen.
 
 ## Estructura de un proyecto
 
@@ -72,7 +79,7 @@ fuerza:3 | velocidad:5 | vida:10
 ```
 
 - El orden de la celda es el orden de dibujo. Puede haber cuantos quieras.
-- El valor es texto libre (`ataque:X`, `daño:1d6`) u omitible (`escudo`).
+- El valor es texto libre (`ataque:X`, `daño:1d6`) u omitible (`escudo`, `volar`): sin valor se dibuja solo el icono (una habilidad).
 - Icono distinto solo en esta carta: `vida:10@iconos/corazon-roto.svg`.
 
 ### Marcado en textos
@@ -166,7 +173,7 @@ Comunes: `id`, `type`, `rect: {x, y, w, h}`, `bleed` (true = los bordes que toca
 
 **attribute** (atributo fijo): `key` (clave del catálogo), `icon` (opcional, sustituye al del catálogo), `valuePosition`: `over` | `after` | `below` | `none`, `showIfMissing`, `font`. Se dibuja solo si la carta tiene ese atributo.
 
-**attributes** (lista): `bind` (por defecto `atributos`), `direction`: `column` | `row`, `align`: `start` | `center` | `end`, `iconSize` (mm), `gap` (mm), `valuePosition`: `over` | `after` | `below`, `font`, `keys` (opcional: solo estos atributos, para repartirlos entre dos laterales).
+**attributes** (lista): `bind` (por defecto `atributos`), `direction`: `column` | `row`, `align`: `start` | `center` | `end`, `iconSize` (mm), `gap` (mm), `valuePosition`: `over` | `after` | `below`, `font`, `keys` (opcional: solo estos atributos, para repartirlos entre dos laterales), `labels` (sin valor, escribe el nombre del atributo junto al icono: «Volar»), `backdrop` + `backdropOpacity` (fondo redondeado detrás de cada icono, color o nombre de la paleta, para que se lea sobre la ilustración).
 
 **shape** (forma): `shape`: `rect` | `ellipse`, `fill` y `stroke` (color fijo o nombre de la paleta), `fillBind` y `strokeBind` (columna con el color de cada carta; `-` en la celda lo quita), `strokeWidth` (mm, se dibuja por dentro de la zona), `radius` (mm, esquinas), `opacity` (0–1). Para cintas, fondos de texto, gemas de rareza…
 

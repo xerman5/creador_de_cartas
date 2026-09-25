@@ -1,11 +1,25 @@
 import Papa from 'papaparse';
 import { layoutZones, artPath } from './designs';
 import { artSvg, backSvg, costSvg, iconSvg, shiftColor } from './art';
-import { attrKey, fileKey, resolvedType, textKey, typeKey, type CardData, type ElementKey, type FineTune, type WizardAnswers } from './answers';
+import {
+  attrKey,
+  fileKey,
+  flagOn,
+  FONT_PAIRS,
+  mergeFine,
+  resolvedType,
+  textKey,
+  typeKey,
+  type CardData,
+  type CardImages,
+  type ElementKey,
+  type FineTune,
+  type WizardAnswers,
+} from './answers';
 import { DEFAULT_SAFE_MM } from '../card';
 import { PROJECT_FILE, serializeProject } from '../project';
 import { normalizeKey } from '../text';
-import type { AttributeDef, Project, Template, Zone } from '../types';
+import type { AttributeDef, CardSize, Project, Template, Zone } from '../types';
 
 /** Textos de relleno: el panel de pendientes los reconoce para avisar de lo que falta escribir. */
 export const PLACEHOLDERS: Record<string, { rules: string; flavor: string }> = {
@@ -35,6 +49,10 @@ const KNOWN_SHAPES: Record<string, number> = { ataque: 0, fuerza: 0, dano: 0, vi
 function shapeIndex(key: string): number {
   return KNOWN_SHAPES[key] ?? [...key].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 8;
 }
+
+/** Icono provisional de un atributo (el que se usa si no se sube uno propio). */
+export const provisionalIcon = (key: string, color: string, ink: string) => iconSvg(shapeIndex(key), color, ink);
+export { costSvg };
 
 /** Todos los archivos del proyecto, listos para escribir en una carpeta o en un zip. */
 export function projectFiles(built: BuiltProject): Record<string, string> {
@@ -103,10 +121,68 @@ function backTemplate(answers: WizardAnswers, f: number): Template {
   return { zones };
 }
 
-/** Aplica el ajuste fino (colores, transparencia, bordes, tamaños de letra) por id de zona. */
-export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number): Zone[] {
+const isContent = (z: Zone) => z.type === 'text' || z.type === 'attribute' || z.type === 'attributes';
+
+/**
+ * Fondo (debajo de todo) y marco (encima de ilustración y formas, debajo de textos e iconos) de la carta.
+ * Con marco, el contenido pasa a dibujarse después de todas las formas; nunca estaba debajo de ninguna.
+ */
+export function withCardImages(zones: Zone[], images: CardImages | undefined, size: Pick<CardSize, 'width' | 'height'>): Zone[] {
+  const full = { x: 0, y: 0, w: size.width, h: size.height };
+  let out = zones;
+  if (images?.background) {
+    const bg: Zone = { id: 'fondo imagen', type: 'image', default: images.background, fit: 'cover', bleed: true, locked: true, rect: full };
+    const at = out.findIndex((z) => z.id === 'fondo') + 1;
+    out = [...out.slice(0, at), bg, ...out.slice(at)];
+  }
+  if (images?.frame) {
+    const frame: Zone = { id: 'marco imagen', type: 'image', default: images.frame, fit: 'stretch', bleed: true, locked: true, rect: full };
+    out = [...out.filter((z) => !isContent(z)), frame, ...out.filter(isContent)];
+  }
+  return out;
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Aplica el ajuste fino (colores, transparencia, bordes, letra, iconos) por id de zona. */
+export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number, fonts = FONT_PAIRS.clasica): Zone[] {
   if (!fine) return zones;
+  const r2 = (v: number) => Math.round(v * 100) / 100;
   return zones.map((z) => {
+    const ic = fine.icons?.[z.id];
+    if (z.type === 'attributes' && ic) {
+      const out = { ...z };
+      if (ic.scale !== undefined) {
+        out.iconSize = r2(z.iconSize * clamp(ic.scale, 0.5, 1));
+        out.font = { ...z.font, size: r2(z.font.size * clamp(ic.scale, 0.5, 1)) };
+      }
+      if (ic.value) out.valuePosition = ic.value;
+      if (ic.labels !== undefined) out.labels = ic.labels;
+      if (ic.backdrop) {
+        out.backdrop = ic.backdrop === 'none' ? undefined : ic.backdrop;
+        // El texto junto al icono tiene que leerse sobre su fondo; sin fondo, blanco con contorno.
+        const ink = { tinta: 'papel', principal: 'papel', papel: 'tinta', acento: 'tinta' }[ic.backdrop as string];
+        out.font = ink
+          ? { ...out.font, color: ink, strokeColor: undefined, strokeWidth: undefined }
+          : { ...out.font, color: '#ffffff', strokeColor: '#000000', strokeWidth: r2(0.35 * f) };
+      }
+      if (ic.align) out.align = ic.align;
+      return out;
+    }
+    if (z.type === 'attribute' && ic?.scale !== undefined) {
+      // Se encoge hacia su centro: nunca sale de donde estaba.
+      const k = clamp(ic.scale, 0.5, 1);
+      const w = z.rect.w * k;
+      const h = z.rect.h * k;
+      const rect = { x: r2(z.rect.x + (z.rect.w - w) / 2), y: r2(z.rect.y + (z.rect.h - h) / 2), w: r2(w), h: r2(h) };
+      return { ...z, rect, font: { ...z.font, size: r2(z.font.size * k) } };
+    }
+    if (z.type === 'shape' && ic?.scale !== undefined && !fine.pieces[z.id]) {
+      const k = clamp(ic.scale, 0.5, 1);
+      const w = z.rect.w * k;
+      const h = z.rect.h * k;
+      return { ...z, rect: { x: r2(z.rect.x + (z.rect.w - w) / 2), y: r2(z.rect.y + (z.rect.h - h) / 2), w: r2(w), h: r2(h) } };
+    }
     if (z.type === 'shape' && fine.pieces[z.id]) {
       const p = fine.pieces[z.id];
       const out = { ...z };
@@ -120,12 +196,16 @@ export function applyFine(zones: Zone[], fine: FineTune | undefined, f: number):
     }
     if (z.type === 'text' && fine.texts[z.id]) {
       const t = fine.texts[z.id];
-      const scale = Math.min(1.5, Math.max(0.7, t.scale ?? 1));
-      const r2 = (v: number) => Math.round(v * 100) / 100;
+      const scale = clamp(t.scale ?? 1, 0.7, 1.5);
+      const font = { ...z.font, size: r2(z.font.size * scale) };
+      if (t.color) font.color = t.color;
+      if (t.font) font.family = t.font === 'title' ? fonts.title : fonts.body;
+      if (t.bold !== undefined) font.weight = t.bold ? 'bold' : 'normal';
+      if (t.italic !== undefined) font.style = t.italic ? 'italic' : 'normal';
       return {
         ...z,
         minSize: z.minSize !== undefined ? r2(z.minSize * scale) : undefined,
-        font: { ...z.font, size: r2(z.font.size * scale), ...(t.color ? { color: t.color } : {}) },
+        font,
         ...(t.align ? { align: t.align } : {}),
       };
     }
@@ -156,13 +236,20 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   if (any('stats')) a.attributes.forEach((at) => {
     const key = attrKey(at);
     if (!key || attributes[key]) return;
-    const icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
-    files[`assets/${icon}`] = iconSvg(shapeIndex(key), at.color, palette.tinta);
+    // El icono propio lo aporta quien llama (los archivos subidos); si no, uno provisional de su color.
+    let icon = at.icon?.trim();
+    if (!icon) {
+      icon = `${PROVISIONAL_DIR}iconos/${fileKey(key)}.svg`;
+      files[`assets/${icon}`] = iconSvg(shapeIndex(key), at.color, palette.tinta);
+    }
     attributes[key] = { icon, label: at.label.trim() };
   });
   if (usesCost && !attributes[COST_KEY]) {
-    const icon = `${PROVISIONAL_DIR}iconos/coste.svg`;
-    files[`assets/${icon}`] = costSvg(palette);
+    let icon = a.costIcon?.trim();
+    if (!icon) {
+      icon = `${PROVISIONAL_DIR}iconos/coste.svg`;
+      files[`assets/${icon}`] = costSvg(palette);
+    }
     attributes[COST_KEY] = { icon, label: 'Coste' };
   }
 
@@ -175,18 +262,25 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
   types.forEach((t, i) => {
     const key = typeKey(t);
     const r = resolved[i];
-    const zones = applyFine(
-      layoutZones({
-        design: a.design,
-        elements: r.elements,
-        size,
-        adjust: a.adjust,
-        tipo: key,
-        statKeys: r.attributes,
-        variantColumn: variantCol,
-      }),
-      a.fine,
-      f,
+    const fine = mergeFine(a.fine, t.fine);
+    const zones = withCardImages(
+      applyFine(
+        layoutZones({
+          design: a.design,
+          elements: r.elements,
+          size,
+          adjust: { ...a.adjust, ...fine.layout },
+          tipo: key,
+          statKeys: r.stats,
+          abilityKeys: r.abilities,
+          variantColumn: variantCol,
+        }),
+        fine,
+        f,
+        FONT_PAIRS[a.adjust.fonts] ?? FONT_PAIRS.clasica,
+      ),
+      fine.images,
+      size,
     );
     const art = zones.find((z) => z.id === 'ilustracion');
     if (art) files[`assets/${artPath(key)}`] = artSvg(art.rect.w, art.rect.h, palette, i * 47, `${t.label} · ilustración provisional`);
@@ -241,6 +335,8 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       // Lo que el usuario escribió manda; lo vacío se rellena con ejemplos (y queda como pendiente).
       const data: CardData = t.cards?.[k - 1] ?? {};
       const own = (key: string) => (data[key] ?? '').trim();
+      // Una carta sin nada escrito lleva habilidades de ejemplo; en cuanto se rellena, solo las marcadas.
+      const untouched = !Object.entries(data).some(([key, v]) => !['id', 'ilustracion', 'copias'].includes(key) && v.trim());
       const row: Record<string, string> = { id: own('id') || `${pre[i]}-${String(k).padStart(3, '0')}`, tipo: t.label.trim() };
       for (const l of langs) {
         const ph = PLACEHOLDERS[l] ?? PLACEHOLDERS.es;
@@ -252,7 +348,12 @@ export function buildProject(answers: WizardAnswers): BuiltProject {
       }
       const attrs: string[] = [];
       if (r.elements.has('cost')) attrs.push(`${COST_KEY}:${own('coste') || ((k - 1) % 5) + 1}`);
-      if (r.elements.has('stats')) r.attributes.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
+      if (r.elements.has('stats')) {
+        r.stats.forEach((key, j) => attrs.push(`${key}:${own(`attr:${key}`) || ((k + j * 2) % 6) + 1}`));
+        r.abilities.forEach((key, j) => {
+          if (untouched ? (k + j) % 2 === 1 : flagOn(own(`attr:${key}`))) attrs.push(key);
+        });
+      }
       if (attrs.length) row.atributos = attrs.join(' | ');
       if (r.elements.has('variant') && a.variant.values.length)
         row[variantCol] = own('variante') || a.variant.values[(k - 1) % a.variant.values.length].name;

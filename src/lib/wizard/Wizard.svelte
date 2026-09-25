@@ -10,18 +10,25 @@
     fileKey,
     DESIGNS,
     ELEMENTS,
+    flagOn,
     FONT_PAIRS,
+    isAbility,
     PALETTES,
     resolvedType,
     textKey,
     typeKey,
     type DesignId,
     type ElementKey,
-    type PieceColor,
     type TypeAnswer,
     type WizardAnswers,
   } from '../../core/wizard/answers';
-  import { buildProject, cardIds, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles } from '../../core/wizard/build';
+  import { buildProject, cardIds, costSvg, MAX_ROWS_PER_TYPE, PLACEHOLDERS, projectFiles, provisionalIcon } from '../../core/wizard/build';
+  import { matchByName, resourceFiles, resourcePath, shelfOf, type Resources, type ShelfId } from '../../core/wizard/resources';
+  import ResourceShelf from '../ResourceShelf.svelte';
+  import ResourceSlot from '../ResourceSlot.svelte';
+  import { tourElements, type Library } from './tour';
+  import TypeTour from './TypeTour.svelte';
+  import { acceptsDrop, droppedEntries } from '../drop';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
@@ -31,12 +38,14 @@
     clearDraft,
     imageFiles,
     loadDraft,
+    loadDraftResources,
     parseProgress,
     previewLabel,
     previewProject,
     progressJson,
     rowOfType,
     saveDraft,
+    saveDraftResources,
   } from './preview';
 
   let { oncreate, oncancel }: { oncreate: (src: FileSource, note?: string) => void; oncancel: () => void } = $props();
@@ -48,15 +57,16 @@
     { id: 'atributos', title: 'Atributos y rareza' },
     { id: 'diseno', title: 'Diseño' },
     { id: 'ajustes', title: 'Ajustes' },
-    { id: 'fino', title: 'Ajuste fino (opcional)' },
+    { id: 'recorrido', title: 'Tipo a tipo' },
     { id: 'traseras', title: 'Traseras' },
     { id: 'cartas', title: 'Cartas' },
     { id: 'imagenes', title: 'Imágenes' },
     { id: 'crear', title: 'Crear' },
   ] as const;
   type StepId = (typeof STEPS)[number]['id'];
+  // «fino» era el ajuste fino global, sustituido por el recorrido tipo a tipo.
   const stepIndex = (s: string | number) =>
-    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === s));
+    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === (s === 'fino' ? 'recorrido' : s)));
   const LANGS: [string, string][] = [
     ['es', 'Español'],
     ['en', 'Inglés'],
@@ -101,12 +111,13 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const f = focus;
     const images = imageMap;
+    const res = resources;
     const sid = stepId;
     let cancelled = false;
     const t = setTimeout(async () => {
       saveDraft(snap, sid);
       try {
-        const lp = await previewProject(snap, { focus: f, images });
+        const lp = await previewProject(snap, { focus: f, images, resources: res });
         if (cancelled) return lp.assets.dispose();
         swap(preview);
         preview = lp;
@@ -127,7 +138,7 @@
     let cancelled = false;
     (async () => {
       const next: Partial<Record<DesignId, LoadedProject>> = {};
-      for (const d of DESIGNS) next[d.id] = await previewProject(snap, { design: d.id });
+      for (const d of DESIGNS) next[d.id] = await previewProject(snap, { design: d.id, resources });
       if (cancelled) return Object.values(next).forEach((lp) => lp?.assets.dispose());
       Object.values(designPreviews).forEach((lp) => swap(lp ?? null));
       designPreviews = next;
@@ -170,9 +181,22 @@
 
   function go(to: number) {
     if (to > step && problems.length) return;
+    // En el recorrido, «Siguiente» y «Atrás» pasan por cada elemento de cada tipo antes de salir.
+    if (stepId === 'recorrido' && Math.abs(to - step) === 1 && tourMove(to - step)) return;
+    const from = step;
     step = Math.max(0, Math.min(STEPS.length - 1, to));
     reached = Math.max(reached, step);
     error = '';
+    if (STEPS[step].id === 'recorrido' && from !== step) {
+      // Entrando desde delante se empieza por el principio; volviendo desde detrás, por el final.
+      if (from < step) {
+        current = 0;
+        tourEl = 0;
+      } else {
+        current = answers.types.length - 1;
+        tourEl = Number.MAX_SAFE_INTEGER;
+      }
+    }
   }
 
   // ------------------------------------------------------------ edición
@@ -239,6 +263,7 @@
     row = 0;
     imageMap = new Map();
     match = null;
+    setResources(new Map());
   }
 
   // ------------------------------------------------------------ progreso
@@ -246,16 +271,17 @@
   let notice = $state('');
   let progressInput: HTMLInputElement;
 
-  function saveProgress() {
-    const json = progressJson($state.snapshot(answers) as WizardAnswers, stepId);
+  async function saveProgress() {
+    const json = await progressJson($state.snapshot(answers) as WizardAnswers, stepId, resources);
     downloadBlob(new Blob([json], { type: 'application/json' }), `${slug(answers.name)}.asistente.json`);
-    notice = 'Progreso guardado. Para seguir otro día, abre el asistente y pulsa «Cargar progreso…».';
+    notice = 'Progreso guardado (con tus iconos y fondos). Para seguir otro día, abre el asistente y pulsa «Cargar progreso…».';
   }
 
   async function loadProgress(file: File) {
     try {
       const p = parseProgress(await file.text());
       answers = p.answers;
+      setResources(p.resources ?? new Map());
       step = stepIndex(p.step);
       reached = Math.max(step, STEPS.length - 1);
       current = 0;
@@ -267,45 +293,121 @@
     }
   }
 
-  // ------------------------------------------------------------ ajuste fino
+  // ------------------------------------------------------------ recursos (iconos y fondos)
 
-  const PIECE_LABELS: Record<string, string> = {
-    fondo: 'Fondo de la carta',
-    cabecera: 'Banda del título',
-    'caja de texto': 'Caja de texto',
-    'banda tipo': 'Banda de la línea de tipo',
-    'fondo atributos': 'Fondo de los atributos',
-    panel: 'Panel de texto',
-    placa: 'Placa del nombre',
-    marco: 'Marco de la carta',
-    'marco ilustracion': 'Marco de la ilustración',
-  };
-  const TEXT_LABELS: Record<string, string> = {
-    titulo: 'Título',
-    'linea de tipo': 'Línea de tipo',
-    reglas: 'Reglas',
-    ambientacion: 'Ambientación',
-    numero: 'Número de colección',
-  };
-  const COLORS: [PieceColor, string][] = [
-    ['principal', 'Principal'],
-    ['acento', 'Acento'],
-    ['papel', 'Papel'],
-    ['tinta', 'Tinta'],
-    ['none', 'Transparente'],
-  ];
-  let showPieces = $state(true);
+  /** Iconos y fondos subidos: van al proyecto y al archivo de progreso. */
+  let resources = $state.raw<Resources>(new Map());
+  let resourceUrls = $state.raw<Map<string, string>>(new Map());
+  // Al abrir, los del borrador de este navegador (si no se ha cargado ya otra cosa).
+  loadDraftResources().then((r) => {
+    if (!resources.size && r.size) resources = r;
+  });
+
+  $effect(() => {
+    const m = new Map([...resources].map(([p, b]) => [p, URL.createObjectURL(b)]));
+    resourceUrls = m;
+    return () => setTimeout(() => m.forEach((u) => URL.revokeObjectURL(u)), 4000);
+  });
+
+  function setResources(next: Resources) {
+    resources = next;
+    saveDraftResources(next);
+  }
+
+  /** Copia archivos a un estante y devuelve sus rutas (en el mismo orden). */
+  function addResources(files: File[], shelf: ShelfId): string[] {
+    const next = new Map(resources);
+    const paths = files.map((f) => {
+      const path = resourcePath(shelf, f.name, (p) => next.has(p));
+      next.set(path, f);
+      return path;
+    });
+    setResources(next);
+    return paths;
+  }
+
+  function removeResource(path: string) {
+    const next = new Map(resources);
+    next.delete(path);
+    setResources(next);
+    for (const at of answers.attributes) if (at.icon === path) at.icon = undefined;
+    if (answers.costIcon === path) answers.costIcon = undefined;
+    for (const f of [answers.fine, ...answers.types.map((t) => t.fine)]) {
+      if (f?.images?.background === path) delete f.images.background;
+      if (f?.images?.frame === path) delete f.images.frame;
+    }
+  }
+
+  const shelfItems = (shelf: ShelfId) => [...resourceUrls].filter(([p]) => shelfOf(p) === shelf).map(([path, url]) => ({ path, url }));
+
+  const svgUrl = (svg: string) => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+
+  /** Lo que se ve en el hueco del icono: el propio o el provisional. */
+  function iconUrl(at: { label: string; color: string; icon?: string }): string | undefined {
+    if (at.icon) return resourceUrls.get(at.icon);
+    return svgUrl(provisionalIcon(attrKey(at), at.color, answers.adjust.palette.tinta));
+  }
+  const costUrl = $derived(answers.costIcon ? resourceUrls.get(answers.costIcon) : svgUrl(costSvg(answers.adjust.palette)));
+
+  /** Atributo (índice) o «coste» cuyo icono se está eligiendo en la biblioteca. */
+  let picking = $state<number | 'coste' | null>(null);
+  let iconReport = $state('');
+
+  function setIcon(target: number | 'coste', path: string | undefined) {
+    if (target === 'coste') answers.costIcon = path;
+    else if (answers.attributes[target]) answers.attributes[target].icon = path;
+    picking = null;
+  }
+
+  /** Iconos nuevos: los que se llaman como un atributo sin icono propio se le asignan solos. */
+  function addIcons(files: File[]) {
+    const paths = addResources(files, 'iconos');
+    const byFile = new Map(files.map((f, i) => [f, paths[i]]));
+    const names = answers.attributes.filter((at) => !at.icon && attrKey(at)).map((at) => at.label);
+    if (uses('cost') && !answers.costIcon) names.push('Coste');
+    const matched = matchByName(files, names);
+    for (const [name, file] of matched) {
+      if (name === 'Coste' && !answers.attributes.some((at) => at.label === 'Coste')) answers.costIcon = byFile.get(file);
+      else {
+        const at = answers.attributes.find((x) => x.label === name);
+        if (at) at.icon = byFile.get(file);
+      }
+    }
+    iconReport =
+      `${files.length} ${files.length === 1 ? 'icono añadido' : 'iconos añadidos'}` +
+      (matched.size ? `; puestos por su nombre: ${[...matched.keys()].join(', ')}.` : '. Arrástralos a cada atributo o haz clic en su icono.');
+  }
+
+  // ------------------------------------------------------------ recorrido tipo a tipo
 
   const tplZones = $derived(preview?.project.templates[typeKey({ label: previewLabel(currentType?.label) })]?.zones ?? []);
-  const pieces = $derived(tplZones.filter((z) => z.type === 'shape' && PIECE_LABELS[z.id]));
-  const texts = $derived(tplZones.filter((z) => z.type === 'text' && TEXT_LABELS[z.id]));
+  const tour = $derived(tourElements(tplZones));
+  /** Elemento del recorrido; puede pasarse del final (volviendo hacia atrás) y se ajusta al dibujar. */
+  let tourEl = $state(0);
+  const tourAt = $derived(Math.min(tourEl, Math.max(0, tour.length - 1)));
 
-  function piece(id: string) {
-    return (answers.fine.pieces[id] ??= {});
+  /** Avanza (o retrocede) un elemento; devuelve false si ya no quedan y hay que cambiar de paso. */
+  function tourMove(dir: number): boolean {
+    // Mientras se dibuja la plantilla no se sabe qué elementos tiene: se espera.
+    if (!tour.length) return true;
+    const at = tourAt + dir;
+    if (at >= 0 && at < tour.length) {
+      tourEl = at;
+      return true;
+    }
+    const type = current + dir;
+    if (type < 0 || type >= answers.types.length) return false;
+    current = type;
+    tourEl = dir > 0 ? 0 : Number.MAX_SAFE_INTEGER;
+    return true;
   }
-  function text(id: string) {
-    return (answers.fine.texts[id] ??= {});
-  }
+
+  const lib: Library = {
+    items: (shelf) => shelfItems(shelf),
+    add: (files, shelf) => addResources(files, shelf),
+    remove: (path) => removeResource(path),
+    url: (path) => (path ? resourceUrls.get(path) : undefined),
+  };
 
   // ------------------------------------------------------------ tabla
 
@@ -417,6 +519,23 @@
     runMatch();
   }
 
+  let dropOver = $state(false);
+
+  /** Imágenes o una carpeta soltadas: se suman a las que ya hay y se vuelve a emparejar. */
+  async function dropImages(e: DragEvent) {
+    dropOver = false;
+    e.preventDefault();
+    const list = await droppedEntries(e);
+    if (!list.length) return;
+    // Si se suelta una sola carpeta, las rutas son relativas a ella, como al elegirla.
+    const tops = new Set(list.map((d) => (d.path.includes('/') ? d.path.split('/')[0] : '')));
+    const strip = tops.size === 1 && !tops.has('');
+    const map = new Map(imageMap);
+    for (const d of list) map.set(strip ? d.path.split('/').slice(1).join('/') : d.path, d.file);
+    imageMap = map;
+    runMatch();
+  }
+
   /** Cartas que apuntan a imágenes de la carpeta que no están cargadas (p. ej. tras recargar la página). */
   function pendingImages(): number {
     let n = 0;
@@ -451,7 +570,7 @@
     const snap = $state.snapshot(answers) as WizardAnswers;
     const used = new Set(snap.types.flatMap((t) => (t.cards ?? []).map((c) => c.ilustracion ?? '')));
     const images = new Map([...imageMap].filter(([p]) => used.has(`${IMAGES_DIR}/${p}`)));
-    return { ...projectFiles(buildProject(snap)), ...imageFiles(images) };
+    return { ...projectFiles(buildProject(snap)), ...resourceFiles(resources), ...imageFiles(images) };
   }
 
   async function run(label: string, fn: () => Promise<void>) {
@@ -634,10 +753,11 @@
       {/if}
       {#if uses('stats')}
         <div class="field">
-          <span>¿Qué atributos existen en tu juego?</span>
+          <span>¿Qué atributos y habilidades existen en tu juego?</span>
           <p class="hint">
-            Un atributo es un <b>número con icono</b> que cambia en cada carta: Ataque 3, Vida 5, Velocidad 2. Cada uno tendrá un icono
-            provisional de su color, y en los textos <code>{'{ataque}'}</code> dibuja su icono.
+            Hay dos clases: <b>con número</b>, que cambia en cada carta (Ataque 3, Vida 5), y <b>solo icono</b>, una habilidad que la
+            carta tiene o no (Volar, Veneno). Las habilidades van en su propia fila. En los textos, <code>{'{ataque}'}</code> dibuja su
+            icono.
           </p>
           <p class="hint">
             ¿Buscas una categoría como clan, facción o rareza? Eso no es un atributo: vuelve al paso anterior y marca «Rareza, clan o
@@ -645,8 +765,21 @@
           </p>
           {#each answers.attributes as at, i}
             <div class="row attr">
-              <input type="color" bind:value={at.color} />
+              <ResourceSlot
+                url={iconUrl(at)}
+                label={at.label || 'atributo'}
+                custom={!!at.icon}
+                active={picking === i}
+                onclick={() => (picking = picking === i ? null : i)}
+                onfile={(f) => setIcon(i, addResources([f], 'iconos')[0])}
+                onpath={(p) => setIcon(i, p)}
+              />
+              <input type="color" bind:value={at.color} title="Color del icono provisional" />
               <input type="text" value={at.label} oninput={(e) => renameAttr(i, e.currentTarget.value)} placeholder="Nombre" />
+              <div class="seg small-seg" role="group" aria-label="Clase de {at.label}">
+                <button class:active={!isAbility(at)} onclick={() => (at.kind = 'number')} title="Un número que cambia en cada carta">Con número</button>
+                <button class:active={isAbility(at)} onclick={() => (at.kind = 'icon')} title="La carta la tiene o no">Solo icono</button>
+              </div>
               <button class="ghost small" onclick={() => moveAttr(i, -1)} disabled={i === 0} title="Subir" aria-label="Subir {at.label}">↑</button>
               <button class="ghost small" onclick={() => moveAttr(i, 1)} disabled={i === answers.attributes.length - 1} title="Bajar" aria-label="Bajar {at.label}">↓</button>
               <button class="ghost small" onclick={() => removeAttr(i)} title="Quitar">✕</button>
@@ -655,22 +788,30 @@
           {#if answers.attributes.length > 1}
             <p class="hint">El orden de esta lista es el orden en que aparecen en la carta.</p>
           {/if}
-          <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length] })}>
-            ＋ Atributo
-          </button>
+          <div class="row">
+            <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length] })}>
+              ＋ Con número
+            </button>
+            <button class="small" onclick={() => answers.attributes.push({ label: '', color: ATTR_COLORS[answers.attributes.length % ATTR_COLORS.length], kind: 'icon' })}>
+              ＋ Solo icono
+            </button>
+          </div>
         </div>
         {@const named = answers.attributes.filter((at) => attrKey(at))}
         {@const statTypes = answers.types.filter((t) => !t.sameAs && t.elements.includes('stats'))}
         <div class="field">
           <span>¿Qué atributos lleva cada tipo de carta?</span>
           {#if named.length}
-            <p class="hint">Marca las casillas: los atributos marcados aparecen, con su icono y su número, en todas las cartas de ese tipo.</p>
+            <p class="hint">
+              Marca las casillas: los atributos con número aparecen en todas las cartas de ese tipo; las habilidades, en las cartas que
+              las tengan (lo marcarás en la tabla de cartas).
+            </p>
             <div class="matrix-wrap">
               <table class="matrix">
                 <thead>
                   <tr>
                     <th></th>
-                    {#each named as at}<th><i style:background={at.color}></i>{at.label}</th>{/each}
+                    {#each named as at}<th><img src={iconUrl(at)} alt="" />{at.label}{#if isAbility(at)}<small>solo icono</small>{/if}</th>{/each}
                   </tr>
                 </thead>
                 <tbody>
@@ -701,7 +842,55 @@
         </div>
       {/if}
       {#if uses('cost')}
-        <p class="hint">El <b>coste</b> es un atributo aparte con icono de moneda; su valor va en la misma columna: <code>coste:3</code>.</p>
+        <div class="field">
+          <span>Coste</span>
+          <div class="row attr">
+            <ResourceSlot
+              url={costUrl}
+              label="Coste"
+              custom={!!answers.costIcon}
+              active={picking === 'coste'}
+              onclick={() => (picking = picking === 'coste' ? null : 'coste')}
+              onfile={(f) => setIcon('coste', addResources([f], 'iconos')[0])}
+              onpath={(p) => setIcon('coste', p)}
+            />
+            <p class="hint">El <b>coste</b> es un número con su propio icono, en una esquina. Su valor va en la misma columna que los atributos: <code>coste:3</code>.</p>
+          </div>
+        </div>
+      {/if}
+      {#if uses('stats') || uses('cost')}
+        <div class="field">
+          <span>Tus iconos</span>
+          {#if picking !== null}
+            {@const name = picking === 'coste' ? 'Coste' : answers.attributes[picking]?.label || 'este atributo'}
+            <p class="hint pick">
+              Elige el icono de <b>{name}</b>, o añade uno nuevo.
+              {#if picking === 'coste' ? answers.costIcon : answers.attributes[picking]?.icon}
+                <button class="ghost small" onclick={() => setIcon(picking!, undefined)}>Volver al provisional</button>
+              {/if}
+              <button class="ghost small" onclick={() => (picking = null)}>Cancelar</button>
+            </p>
+          {:else}
+            <p class="hint">
+              Suelta aquí tus iconos (PNG con transparencia o SVG), o una carpeta entera. Los que se llamen como un atributo se ponen
+              solos (<code>volar.png</code> → Volar); los demás, arrástralos a su atributo o haz clic en el icono del atributo para
+              elegirlo.
+            </p>
+          {/if}
+          <ResourceShelf
+            items={shelfItems('iconos')}
+            compact
+            selected={picking === null ? '' : ((picking === 'coste' ? answers.costIcon : answers.attributes[picking]?.icon) ?? '')}
+            onpick={picking === null ? undefined : (p) => setIcon(picking!, p)}
+            onadd={(files) => {
+              if (picking !== null) setIcon(picking, addResources(files, 'iconos')[0]);
+              else addIcons(files);
+            }}
+            onremove={removeResource}
+            empty="Sin iconos propios: se usan los provisionales, de colores."
+          />
+          {#if iconReport}<div class="report">{iconReport} <button class="ghost small" onclick={() => (iconReport = '')}>✕</button></div>{/if}
+        </div>
       {/if}
       {#if uses('variant')}
         <div class="field">
@@ -800,124 +989,36 @@
         </div>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={answers.adjust.rounded} /> Esquinas redondeadas en cajas y bandas</label>
-    {:else if stepId === 'fino'}
-      <h2>Ajuste fino</h2>
+    {:else if stepId === 'recorrido'}
+      <h2>Tipo a tipo</h2>
       <p class="lead">
-        Opcional: retoca cada pieza del diseño. Los cambios valen para todos los tipos. Puedes saltarte este paso y volver cuando
-        quieras.
+        Repasamos cada tipo, elemento por elemento. Ajusta lo que quieras y pulsa «Siguiente»; lo que no toques se queda como en el
+        diseño. Puedes volver aquí cuando quieras.
       </p>
       {@render typeTabs()}
-      {#if uses('art') && (uses('rules') || uses('flavor'))}
-        <label class="field">
-          <span>Tamaño de la caja de texto: {Math.round((1 - answers.adjust.art) * 100)} %</span>
-          <input
-            type="range"
-            min="0.25"
-            max="0.7"
-            step="0.05"
-            value={1 - answers.adjust.art}
-            oninput={(e) => (answers.adjust.art = Math.round((1 - e.currentTarget.valueAsNumber) * 100) / 100)}
-          />
-          <small class="hint">El resto del espacio es para la ilustración.</small>
-        </label>
+      {#if tour.length}
+        <TypeTour
+          bind:answers
+          {current}
+          element={tourAt}
+          elements={tour}
+          zones={tplZones}
+          {lib}
+          {iconUrl}
+          {costUrl}
+          {setIcon}
+          ongo={(type, el) => {
+            current = type;
+            tourEl = el;
+          }}
+        />
+      {:else}
+        <p class="hint">Dibujando…</p>
       {/if}
-      <div class="field">
-        <span>Piezas</span>
-        <table class="fine">
-          <tbody>
-            {#each pieces as z (z.id)}
-              {@const cur = answers.fine.pieces[z.id] ?? {}}
-              {@const fill = cur.fill ?? ((z.type === 'shape' && z.fill) || 'none')}
-              {@const opacity = cur.opacity ?? (z.type === 'shape' ? (z.opacity ?? 1) : 1)}
-              {@const border = cur.border ?? (z.type === 'shape' && !!z.stroke)}
-              <tr>
-                <th>{PIECE_LABELS[z.id]}</th>
-                <td>
-                  <div class="swatches">
-                    {#each COLORS as [c, name]}
-                      <button
-                        class="sw"
-                        class:active={fill === c}
-                        class:none={c === 'none'}
-                        title={name}
-                        aria-label="{PIECE_LABELS[z.id]}: {name}"
-                        style:background={c === 'none' ? undefined : answers.adjust.palette[c]}
-                        onclick={() => (piece(z.id).fill = c)}
-                      ></button>
-                    {/each}
-                  </div>
-                </td>
-                <td>
-                  <label class="inline" title="Opacidad">
-                    <input type="range" min="0" max="1" step="0.05" value={opacity} oninput={(e) => (piece(z.id).opacity = e.currentTarget.valueAsNumber)} />
-                    {Math.round(opacity * 100)} %
-                  </label>
-                </td>
-                <td>
-                  <label class="inline"><input type="checkbox" checked={border} onchange={(e) => (piece(z.id).border = e.currentTarget.checked)} /> Borde</label>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <div class="field">
-        <span>Textos</span>
-        <table class="fine">
-          <tbody>
-            {#each texts as z (z.id)}
-              {@const cur = answers.fine.texts[z.id] ?? {}}
-              <tr>
-                <th>{TEXT_LABELS[z.id]}</th>
-                <td>
-                  <div class="swatches">
-                    {#each COLORS.filter(([c]) => c !== 'none') as [c, name]}
-                      <button
-                        class="sw"
-                        class:active={cur.color === c}
-                        title={name}
-                        aria-label="{TEXT_LABELS[z.id]}: {name}"
-                        style:background={answers.adjust.palette[c as keyof typeof answers.adjust.palette]}
-                        onclick={() => (text(z.id).color = c as never)}
-                      ></button>
-                    {/each}
-                  </div>
-                </td>
-                <td>
-                  <select
-                    value={cur.align ?? (z.type === 'text' ? (z.align ?? 'left') : 'left')}
-                    onchange={(e) => (text(z.id).align = e.currentTarget.value as never)}
-                    aria-label="Alineación de {TEXT_LABELS[z.id]}"
-                  >
-                    <option value="left">Izquierda</option>
-                    <option value="center">Centro</option>
-                    <option value="right">Derecha</option>
-                    <option value="justify">Justificado</option>
-                  </select>
-                </td>
-                <td>
-                  <label class="inline" title="Tamaño de letra">
-                    <input
-                      type="range"
-                      min="0.7"
-                      max="1.5"
-                      step="0.05"
-                      value={cur.scale ?? 1}
-                      oninput={(e) => (text(z.id).scale = e.currentTarget.valueAsNumber)}
-                    />
-                    {Math.round((cur.scale ?? 1) * 100)} %
-                  </label>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-        <p class="hint">Si pones una caja transparente sobre la ilustración, cambia el color de su texto para que se lea.</p>
-      </div>
-      <div class="row">
-        <label class="check"><input type="checkbox" bind:checked={showPieces} /> Señalar las piezas en la carta</label>
-        <button class="small" onclick={() => (answers.fine = { pieces: {}, texts: {} })}>Restablecer el ajuste fino</button>
-      </div>
+      <p class="hint">
+        <button class="ghost small" onclick={() => go(stepIndex('traseras'))}>Saltar el resto del recorrido</button>
+        <button class="ghost small" onclick={() => { if (confirm('¿Quitar todos los ajustes del recorrido (de todos los tipos)?')) { answers.fine = { pieces: {}, texts: {} }; for (const t of answers.types) t.fine = undefined; } }}>Quitar todos los ajustes</button>
+      </p>
     {:else if STEPS[step].id === 'traseras'}
       <h2>Traseras</h2>
       <p class="lead">¿Cómo es el dorso de las cartas?</p>
@@ -971,6 +1072,13 @@
                     <td class={c.kind}>
                       {#if c.kind === 'long'}
                         <textarea rows="2" value={cell(currentType, k, c.key)} placeholder={placeholder(c, k)} oninput={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}></textarea>
+                      {:else if c.kind === 'flag'}
+                        <input
+                          type="checkbox"
+                          checked={flagOn(cell(currentType, k, c.key))}
+                          onchange={(e) => setCell(currentType, k, c.key, e.currentTarget.checked ? 'x' : '')}
+                          aria-label="{c.label} en la carta {k + 1}"
+                        />
                       {:else if c.kind === 'variant'}
                         <select value={cell(currentType, k, c.key)} onchange={(e) => setCell(currentType, k, c.key, e.currentTarget.value)}>
                           <option value="">(automática)</option>
@@ -996,7 +1104,7 @@
         <button class="small" onclick={addCard}>＋ Carta</button>
         <p class="hint">
           En las reglas: <code>**negrita**</code>, <code>*cursiva*</code> y <code>{'{atributo}'}</code> para poner su icono. Los números vacíos se
-          rellenan con valores de ejemplo. ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
+          rellenan con valores de ejemplo; las habilidades, solo si marcas la casilla (las cartas que aún no has tocado llevan algunas de ejemplo). ¿Mucho que escribir? Descarga el CSV, rellénalo con calma, guarda el progreso y vuelve otro día a importarlo.
         </p>
       {/if}
     {:else if stepId === 'imagenes'}
@@ -1015,8 +1123,22 @@
             </label>
           </li>
         </ol>
-        <div class="row">
+        <div
+          class="row dropzone"
+          class:over={dropOver}
+          role="region"
+          aria-label="Soltar imágenes"
+          ondragover={(e) => {
+            if (acceptsDrop(e)) {
+              e.preventDefault();
+              dropOver = true;
+            }
+          }}
+          ondragleave={() => (dropOver = false)}
+          ondrop={dropImages}
+        >
           <button class="primary" onclick={() => folderInput.click()}>Elegir carpeta de imágenes…</button>
+          <span class="hint">o suéltala aquí (también imágenes sueltas)</span>
           {#if imageMap.size}<button class="small" onclick={runMatch}>Volver a emparejar</button>{/if}
         </div>
         <p class="hint">Las imágenes no se suben a ningún sitio: se copian a la carpeta del proyecto al crearlo (en <code>assets/{IMAGES_DIR}/</code>).</p>
@@ -1106,7 +1228,7 @@
       </div>
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
-      {@render card(preview, currentType?.label ?? '', stepId === 'fino' && showPieces ? { ...opts, zones: true } : opts)}
+      {@render card(preview, currentType?.label ?? '', stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
       <small>{previewLabel(currentType?.label)} · vista previa</small>
     {/if}
   </aside>
@@ -1392,12 +1514,24 @@
     text-align: left;
     font-weight: 600;
   }
-  .matrix i {
-    display: inline-block;
-    width: 9px;
-    height: 9px;
-    border-radius: 50%;
-    margin-right: 5px;
+  .matrix thead img {
+    display: block;
+    width: 22px;
+    height: 22px;
+    margin: 0 auto 3px;
+    object-fit: contain;
+  }
+  .matrix thead small {
+    display: block;
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  .small-seg button {
+    padding: 3px 8px;
+    font-size: 12px;
+  }
+  .pick {
+    color: var(--text);
   }
   .matrix input {
     width: 16px;
@@ -1405,6 +1539,15 @@
   }
   .warn {
     color: var(--warn);
+  }
+  .dropzone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 12px;
+  }
+  .dropzone.over {
+    border-color: var(--accent);
+    background: rgba(76, 125, 255, 0.08);
   }
   .seg {
     display: flex;
@@ -1610,24 +1753,6 @@
   }
   table.fine td {
     padding: 6px 10px 6px 0;
-  }
-  .swatches {
-    display: flex;
-    gap: 4px;
-  }
-  .sw {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 5px;
-    border: 2px solid var(--border);
-  }
-  .sw.none {
-    background: repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0 / 8px 8px;
-  }
-  .sw.active {
-    border-color: #fff;
-    outline: 2px solid var(--accent);
   }
   .rules {
     margin: 0;

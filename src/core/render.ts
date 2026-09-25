@@ -29,6 +29,8 @@ export interface RenderOptions {
   guides?: boolean;
   /** Dibujar el contorno de cada zona (para diseñar la anatomía). */
   zones?: boolean;
+  /** Resaltar estas zonas (por id): el resto de la carta se oscurece. */
+  focus?: string[];
 }
 
 export interface RenderResult {
@@ -94,6 +96,7 @@ export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOp
     }
   }
 
+  if (opts.focus?.length) drawFocus(rc, tpl.zones.filter((z) => opts.focus!.includes(z.id) && !z.hidden));
   if (opts.zones) drawZoneOutlines(rc, tpl.zones);
   if (opts.guides) drawGuides(rc);
   return { canvas, warnings };
@@ -426,12 +429,18 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
 
   const imgs = await Promise.all(items.map((it) => attributeIcon(rc, it.key, it.icon)));
 
+  // Lo que se escribe junto a cada icono: su valor o, si se pide, su nombre.
+  const texts = items.map((it) => it.value || (zone.labels ? (rc.lp.project.attributes[it.key]?.label ?? it.key) : ''));
+  const backdrop = zone.backdrop ? colorFor(rc, undefined, zone.backdrop, zone.id) : '';
+  // Con fondo, cada celda lleva un margen alrededor (y uno más tras el texto): cuenta al alinear.
+  const pad = backdrop ? icon * 0.1 : 0;
   ctx.font = fontString(font, sizePx);
-  const cells = items.map((it) => {
-    const tw = it.value ? ctx.measureText(it.value).width : 0;
-    if (pos === 'after') return { w: icon + (it.value ? gap * 0.5 + tw : 0), h: icon };
-    if (pos === 'below') return { w: Math.max(icon, tw), h: icon + (it.value ? sizePx * 1.1 : 0) };
-    return { w: icon, h: icon };
+  const cells = texts.map((text) => {
+    const tw = text ? ctx.measureText(text).width : 0;
+    const extra = 2 * pad + (text ? pad : 0);
+    if (pos === 'after') return { w: icon + (text ? gap * 0.5 + tw : 0) + extra, h: icon };
+    if (pos === 'below') return { w: Math.max(icon, tw) + extra, h: icon + (text ? sizePx * 1.1 : 0) };
+    return { w: icon + 2 * pad, h: icon };
   });
 
   const total = cells.reduce((s, c) => s + (column ? c.h : c.w), 0) + gap * (cells.length - 1);
@@ -444,8 +453,19 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
     const cell = cells[i];
     const cx = column ? r.x + (r.w - (pos === 'after' ? widest : cell.w)) / 2 : r.x + cursor;
     const cy = column ? r.y + cursor : r.y + (r.h - cell.h) / 2;
-    const ix = pos === 'below' ? cx + (cell.w - icon) / 2 : cx;
+    const ix = pos === 'below' ? cx + (cell.w - icon) / 2 : cx + pad;
     const iy = cy;
+
+    if (backdrop) {
+      // Una píldora que abarca icono y texto; por arriba y por abajo sobresale el margen.
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, Math.max(0, zone.backdropOpacity ?? 1));
+      ctx.fillStyle = backdrop;
+      ctx.beginPath();
+      ctx.roundRect(cx, cy - pad, cell.w, cell.h + 2 * pad, (Math.min(cell.w, cell.h) + 2 * pad) / 2);
+      ctx.fill();
+      ctx.restore();
+    }
 
     const img = imgs[i];
     if (img) drawFit(ctx, img, { x: ix, y: iy, w: icon, h: icon }, 'contain');
@@ -456,17 +476,18 @@ async function drawAttributesZone(rc: Ctx, zone: AttributesZone) {
       ctx.fill();
     }
 
-    if (it.value) {
+    const text = texts[i];
+    if (text) {
       ctx.font = fontString(font, sizePx);
       if (pos === 'over') {
         ctx.textAlign = 'center';
-        paintText(ctx, it.value, ix + icon / 2, iy + icon / 2, font, k);
+        paintText(ctx, text, ix + icon / 2, iy + icon / 2, font, k);
       } else if (pos === 'after') {
         ctx.textAlign = 'left';
-        paintText(ctx, it.value, ix + icon + gap * 0.5, iy + icon / 2, font, k);
+        paintText(ctx, text, ix + icon + gap * 0.5, iy + icon / 2, font, k);
       } else {
         ctx.textAlign = 'center';
-        paintText(ctx, it.value, cx + cell.w / 2, iy + icon + sizePx * 0.6, font, k);
+        paintText(ctx, text, cx + cell.w / 2, iy + icon + sizePx * 0.6, font, k);
       }
     }
     cursor += (column ? cell.h : cell.w) + gap;
@@ -599,6 +620,33 @@ function drawZoneOutlines(rc: Ctx, zones: Zone[]) {
     ctx.fillStyle = '#000';
     ctx.fillText(label, r.x + k * 0.5, r.y + k * 0.3);
   }
+  ctx.restore();
+}
+
+/** Oscurece la carta salvo las zonas dadas y las recuadra. */
+function drawFocus(rc: Ctx, zones: Zone[]) {
+  if (!zones.length) return;
+  const { ctx, k, px } = rc;
+  const rects = zones.map((z) => zonePx(rc, z));
+  // Si una zona es la carta entera (el fondo), no hay nada que oscurecer.
+  if (rects.some((r) => r.w >= px.trimWidth && r.h >= px.trimHeight)) return;
+  // Capa aparte con agujeros: las zonas que se solapan no se anulan entre sí.
+  const layer = document.createElement('canvas');
+  layer.width = ctx.canvas.width;
+  layer.height = ctx.canvas.height;
+  const lc = layer.getContext('2d')!;
+  lc.setTransform(ctx.getTransform());
+  lc.fillStyle = 'rgba(10, 12, 18, 0.55)';
+  lc.fillRect(-px.bleed, -px.bleed, px.trimWidth + 2 * px.bleed, px.trimHeight + 2 * px.bleed);
+  for (const r of rects) lc.clearRect(r.x, r.y, r.w, r.h);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(layer, 0, 0);
+  ctx.restore();
+  ctx.save();
+  ctx.lineWidth = Math.max(2, k * 0.35);
+  ctx.strokeStyle = '#4c7dff';
+  for (const r of rects) ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.restore();
 }
 

@@ -5,6 +5,7 @@
   import { ZONE_COLORS } from '../core/render';
   import type { CardRow, Rect, ZoneType } from '../core/types';
   import CardView from './CardView.svelte';
+  import { acceptsDrop, droppedFiles, droppedResource } from './drop';
   import type { Workspace } from './workspace.svelte';
 
   let {
@@ -57,6 +58,51 @@
   let dragging = $state(false);
   let draft = $state.raw<Rect | null>(null);
   let stageEl: HTMLDivElement;
+  /** Zona sobre la que se está arrastrando una imagen. */
+  let dropTarget = $state<number | null>(null);
+
+  /**
+   * Zona de imagen o de atributo bajo el puntero (la de más arriba), aunque la tapen otras:
+   * ahí va una imagen soltada, sea un archivo o una miniatura de la biblioteca.
+   */
+  function zoneAt(e: DragEvent): number | null {
+    const box = stageEl.getBoundingClientRect();
+    const x = (e.clientX - box.left) / pxPerMm - b;
+    const y = (e.clientY - box.top) / pxPerMm - b;
+    for (let i = tpl.zones.length - 1; i >= 0; i--) {
+      const z = tpl.zones[i];
+      if ((z.type === 'image' || z.type === 'attribute') && !z.hidden && x >= z.rect.x && x <= z.rect.x + z.rect.w && y >= z.rect.y && y <= z.rect.y + z.rect.h)
+        return i;
+    }
+    return null;
+  }
+
+  function dragOver(e: DragEvent) {
+    if (!acceptsDrop(e)) return;
+    dropTarget = zoneAt(e);
+    if (dropTarget !== null) e.preventDefault();
+  }
+
+  async function drop(e: DragEvent) {
+    const i = zoneAt(e);
+    dropTarget = null;
+    if (i === null) return;
+    e.preventDefault();
+    const zone = tpl.zones[i];
+    let path = droppedResource(e);
+    if (!path) {
+      const [file] = await droppedFiles(e);
+      if (!file) return;
+      [path] = await ws.addResources([file], zone.type === 'attribute' ? 'iconos' : 'fondos');
+    }
+    if (!path) return;
+    selected = i;
+    ws.update((p) => {
+      const z = p.templates[tipo].zones[i];
+      if (z.type === 'image') z.default = path;
+      else if (z.type === 'attribute') z.icon = path;
+    });
+  }
 
   const px = (mm: number) => mm * pxPerMm;
 
@@ -138,6 +184,9 @@
   style:width="{width}px"
   style:height="{height}px"
   onpointerdown={(e) => (drawType ? startDraw(e) : (selected = null))}
+  ondragover={dragOver}
+  ondragleave={(e) => !stageEl.contains(e.relatedTarget as Node) && (dropTarget = null)}
+  ondrop={drop}
 >
   <CardView {row} {lp} {opts} {onwarnings} displayWidth={width} />
 
@@ -156,6 +205,7 @@
         style:top="{px(zone.rect.y)}px"
         style:width="{px(zone.rect.w)}px"
         style:height="{px(zone.rect.h)}px"
+        class:droptarget={dropTarget === i}
         onpointerdown={(e) => startDrag(e, i, 'move')}
       >
         <span class="label">{zone.id}</span>
@@ -211,6 +261,10 @@
   .zone:hover {
     outline: 1px solid var(--c);
     background: color-mix(in srgb, var(--c) 10%, transparent);
+  }
+  .zone.droptarget {
+    outline: 3px solid var(--accent);
+    background: rgba(76, 125, 255, 0.25);
   }
   .zone.selected {
     outline: 2px solid var(--c);

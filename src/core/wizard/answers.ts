@@ -9,7 +9,7 @@ export const ELEMENTS: { key: ElementKey; label: string; hint: string }[] = [
   { key: 'rules', label: 'Texto de reglas', hint: 'Lo que hace la carta. Admite iconos: {ataque}.' },
   { key: 'flavor', label: 'Texto de ambientación', hint: 'Una frase en cursiva que no afecta al juego.' },
   { key: 'cost', label: 'Coste', hint: 'Un número en una esquina: lo que cuesta jugarla.' },
-  { key: 'stats', label: 'Atributos', hint: 'Números con icono que cambian en cada carta: Ataque 3, Vida 5…' },
+  { key: 'stats', label: 'Atributos y habilidades', hint: 'Iconos con número (Ataque 3, Vida 5) o solo icono (Volar, Veneno).' },
   { key: 'variant', label: 'Rareza, clan o facción', hint: 'Una categoría con su color: común/rara, un clan, una facción…' },
   { key: 'number', label: 'Número de colección', hint: '«012/120» en el pie de la carta.' },
 ];
@@ -31,12 +31,25 @@ export interface TypeAnswer {
   sameAs?: string;
   /** Datos de sus cartas, en orden; puede tener menos filas que `count`. */
   cards?: CardData[];
+  /** Ajustes solo de este tipo: se aplican encima de los de todos (`WizardAnswers.fine`). */
+  fine?: Partial<FineTune>;
 }
+
+/** `number`: icono con un número que cambia en cada carta (Ataque 3). `icon`: solo icono, la carta lo tiene o no (Volar). */
+export type AttrKind = 'number' | 'icon';
 
 export interface AttrAnswer {
   label: string;
   color: string;
+  kind?: AttrKind;
+  /** Icono propio: ruta dentro de assets/ (`iconos/volar.png`). Sin él se usa uno provisional de su color. */
+  icon?: string;
 }
+
+export const isAbility = (at: Pick<AttrAnswer, 'kind'> | undefined) => at?.kind === 'icon';
+
+/** ¿Una celda de habilidad dice que la carta la tiene? Vacío, «no», «0» o «-» es que no. */
+export const flagOn = (v: string | undefined) => !!v?.trim() && !/^(no|n|0|false|falso|-)$/i.test(v.trim());
 
 export type DesignId = 'clasico' | 'completa' | 'retrato' | 'texto';
 
@@ -99,12 +112,61 @@ export interface TextStyle {
   scale?: number;
   color?: Exclude<PieceColor, 'none'>;
   align?: 'left' | 'center' | 'right' | 'justify';
+  /** Tipo de letra: la de los títulos o la de los textos. */
+  font?: 'title' | 'body';
+  bold?: boolean;
+  italic?: boolean;
 }
 
-/** Ajuste fino por pieza del diseño (por id de zona): se aplica a todos los tipos. */
+/** Iconos de una zona de atributos, habilidades o coste. */
+export interface IconStyle {
+  /** Tamaño respecto al máximo que cabe (0,5–1). */
+  scale?: number;
+  /** Dónde va el número (atributos). */
+  value?: 'over' | 'after' | 'below';
+  /** Escribir el nombre junto al icono (habilidades). */
+  labels?: boolean;
+  /** Fondo de cada icono (habilidades); `none` = sin fondo. */
+  backdrop?: PieceColor;
+  align?: 'start' | 'center' | 'end';
+}
+
+/** Imágenes de la carta entera: van en `assets/fondos/`. */
+export interface CardImages {
+  /** Debajo de todo. */
+  background?: string;
+  /** Encima de la ilustración y las formas, debajo de los textos: un PNG con transparencia. */
+  frame?: string;
+}
+
+/**
+ * Ajuste fino por pieza del diseño (por id de zona). El de `WizardAnswers` vale para todos los tipos;
+ * el de cada tipo (`TypeAnswer.fine`) se aplica encima.
+ */
 export interface FineTune {
   pieces: Record<string, PieceStyle>;
   texts: Record<string, TextStyle>;
+  icons?: Record<string, IconStyle>;
+  images?: CardImages;
+  /** Distribución: tamaño de la ilustración, lado de los atributos, esquina del coste. */
+  layout?: Partial<Pick<Adjust, 'art' | 'attrSide' | 'costCorner'>>;
+}
+
+/** Une el ajuste de todos con el de un tipo (el del tipo manda, pieza a pieza). */
+export function mergeFine(base: FineTune, over: Partial<FineTune> | undefined): FineTune {
+  if (!over) return base;
+  const merge = <T extends object>(a: Record<string, T> | undefined, b: Record<string, T> | undefined) => {
+    const out: Record<string, T> = { ...a };
+    for (const [k, v] of Object.entries(b ?? {})) out[k] = { ...out[k], ...v };
+    return out;
+  };
+  return {
+    pieces: merge(base.pieces, over.pieces),
+    texts: merge(base.texts, over.texts),
+    icons: merge(base.icons, over.icons),
+    images: { ...base.images, ...over.images },
+    layout: { ...base.layout, ...over.layout },
+  };
 }
 
 export interface WizardAnswers {
@@ -119,6 +181,8 @@ export interface WizardAnswers {
   adjust: Adjust;
   backs: 'common' | 'per-type' | 'none';
   fine: FineTune;
+  /** Icono propio del coste (ruta dentro de assets/). */
+  costIcon?: string;
 }
 
 export function defaultAnswers(): WizardAnswers {
@@ -162,7 +226,7 @@ export function withDefaults(raw: Partial<WizardAnswers> | null | undefined): Wi
     attributes: Array.isArray(raw.attributes) ? raw.attributes : d.attributes,
     variant: { ...d.variant, ...raw.variant },
     adjust: { ...d.adjust, ...raw.adjust, palette: { ...d.adjust.palette, ...raw.adjust?.palette } },
-    fine: { pieces: { ...raw.fine?.pieces }, texts: { ...raw.fine?.texts } },
+    fine: { ...raw.fine, pieces: { ...raw.fine?.pieces }, texts: { ...raw.fine?.texts } },
   };
 }
 
@@ -182,7 +246,7 @@ export const attrKey = (a: Pick<AttrAnswer, 'label'>) => normalizeKey(a.label);
 export function resolvedType(
   answers: WizardAnswers,
   t: TypeAnswer,
-): { declared: Set<ElementKey>; elements: Set<ElementKey>; attributes: string[] } {
+): { declared: Set<ElementKey>; elements: Set<ElementKey>; attributes: string[]; stats: string[]; abilities: string[] } {
   let cur = t;
   const seen = new Set<string>();
   while (cur.sameAs && !seen.has(typeKey(cur))) {
@@ -193,11 +257,14 @@ export function resolvedType(
   }
   // El orden de dibujo es el de la lista de atributos del juego, no el orden en que se marcaron.
   const chosen = new Set(cur.attributes.map(normalizeKey));
-  const attributes = answers.attributes.map(attrKey).filter((k) => k && chosen.has(k));
+  const picked = answers.attributes.filter((at) => attrKey(at) && chosen.has(attrKey(at)));
+  const attributes = picked.map(attrKey);
   const declared = new Set(cur.elements);
   const elements = new Set(cur.elements);
   if (!attributes.length) elements.delete('stats');
-  return { declared, elements, attributes };
+  const stats = picked.filter((at) => !isAbility(at)).map(attrKey);
+  const abilities = picked.filter(isAbility).map(attrKey);
+  return { declared, elements, attributes, stats, abilities };
 }
 
 /** Nombre de archivo seguro a partir de una etiqueta. */
