@@ -3,15 +3,17 @@
   import { DEFAULT_CSV, defaultProject, PROJECT_FILE, serializeProject } from './core/project';
   import CardsView from './lib/CardsView.svelte';
   import ProjectSettings from './lib/ProjectSettings.svelte';
+  import ResourcesView from './lib/ResourcesView.svelte';
   import TemplateEditor from './lib/TemplateEditor.svelte';
   import Wizard from './lib/wizard/Wizard.svelte';
   import { Workspace } from './lib/workspace.svelte';
 
-  type Tab = 'proyecto' | 'plantillas' | 'cartas';
+  type Tab = 'proyecto' | 'recursos' | 'plantillas' | 'cartas';
   const TABS: [Tab, string][] = [
     ['proyecto', '1 · Proyecto'],
-    ['plantillas', '2 · Plantillas'],
-    ['cartas', '3 · Cartas'],
+    ['recursos', '2 · Recursos'],
+    ['plantillas', '3 · Plantillas'],
+    ['cartas', '4 · Cartas'],
   ];
 
   const ws = new Workspace();
@@ -218,6 +220,8 @@
       </div>
     {:else if tab === 'proyecto'}
       <ProjectSettings {ws} onedit={editTemplate} />
+    {:else if tab === 'recursos'}
+      <ResourcesView {ws} />
     {:else if tab === 'plantillas'}
       {#key editorKey}
         <TemplateEditor {ws} initialTipo={editTipo} />

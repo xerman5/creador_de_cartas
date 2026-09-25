@@ -182,7 +182,7 @@
     {@render column('Columna CSV', zone.bind, 'bind', (z, v) => (z.bind = v || undefined))}
     <div class="f">
       <span>Por defecto</span>
-      <AssetField {ws} value={zone.default} subdir="marcos" onchange={(v) => edit('default', (z) => (z.default = v || undefined))} />
+      <AssetField {ws} value={zone.default} subdir="fondos" onchange={(v) => edit('default', (z) => (z.default = v || undefined))} />
     </div>
     {@render select('Ajuste', zone.fit, 'fit', [
       ['cover', 'Cubrir (recorta)'],

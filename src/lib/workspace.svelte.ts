@@ -2,6 +2,7 @@ import type { FileSource } from '../core/assets';
 import { downloadBlob } from '../core/export';
 import { loadProject, PROJECT_FILE, serializeProject, type LoadedProject } from '../core/project';
 import type { Project } from '../core/types';
+import { resourcePath, type ShelfId } from '../core/wizard/resources';
 
 const HISTORY_LIMIT = 200;
 /** Cambios seguidos sobre el mismo campo en este intervalo cuentan como un solo paso de deshacer. */
@@ -132,6 +133,45 @@ export class Workspace {
       this.error = `No se pudo copiar la imagen: ${message(e)}`;
       return null;
     }
+  }
+
+  /** Añade archivos a un estante de la biblioteca sin pisar los que ya hay; devuelve sus rutas. */
+  async addResources(files: File[], shelf: ShelfId): Promise<string[]> {
+    const lp = this.lp;
+    if (!lp || !this.source?.write) return [];
+    const taken = new Set(this.assetFiles);
+    const paths: string[] = [];
+    try {
+      for (const f of files) {
+        const path = resourcePath(shelf, f.name, (p) => taken.has(p));
+        taken.add(path);
+        await this.source.write(`${lp.project.assetsDir}/${path}`, f);
+        lp.assets.forget(path);
+        paths.push(path);
+      }
+    } catch (e) {
+      this.error = `No se pudo copiar la imagen: ${message(e)}`;
+    }
+    await this.refreshAssets();
+    return paths;
+  }
+
+  /** Borra un archivo de la carpeta de recursos. */
+  async removeAsset(path: string) {
+    const lp = this.lp;
+    if (!lp || !this.source?.remove) return;
+    try {
+      await this.source.remove(`${lp.project.assetsDir}/${path}`);
+      lp.assets.forget(path);
+    } catch (e) {
+      this.error = `No se pudo borrar: ${message(e)}`;
+    }
+    await this.refreshAssets();
+  }
+
+  async refreshAssets() {
+    const lp = this.lp;
+    if (lp && this.source?.list) this.assetFiles = await this.source.list(lp.project.assetsDir);
   }
 
   #push(p: Project) {

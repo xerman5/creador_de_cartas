@@ -19,7 +19,6 @@
     typeKey,
     type DesignId,
     type ElementKey,
-    type PieceColor,
     type TypeAnswer,
     type WizardAnswers,
   } from '../../core/wizard/answers';
@@ -27,6 +26,8 @@
   import { matchByName, resourceFiles, resourcePath, shelfOf, type Resources, type ShelfId } from '../../core/wizard/resources';
   import ResourceShelf from '../ResourceShelf.svelte';
   import ResourceSlot from '../ResourceSlot.svelte';
+  import { tourElements, type Library } from './tour';
+  import TypeTour from './TypeTour.svelte';
   import { cardRefKey, IMAGE_FILE, IMAGES_DIR, matchImages, type CardRef, type MatchResult } from '../../core/wizard/images';
   import { fillCsv, importCsv, tableColumns, type ImportReport, type TableColumn } from '../../core/wizard/table';
   import { CARD_PRESETS } from '../../core/zones';
@@ -55,15 +56,16 @@
     { id: 'atributos', title: 'Atributos y rareza' },
     { id: 'diseno', title: 'Diseño' },
     { id: 'ajustes', title: 'Ajustes' },
-    { id: 'fino', title: 'Ajuste fino (opcional)' },
+    { id: 'recorrido', title: 'Tipo a tipo' },
     { id: 'traseras', title: 'Traseras' },
     { id: 'cartas', title: 'Cartas' },
     { id: 'imagenes', title: 'Imágenes' },
     { id: 'crear', title: 'Crear' },
   ] as const;
   type StepId = (typeof STEPS)[number]['id'];
+  // «fino» era el ajuste fino global, sustituido por el recorrido tipo a tipo.
   const stepIndex = (s: string | number) =>
-    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === s));
+    typeof s === 'number' ? Math.min(s, STEPS.length - 1) : Math.max(0, STEPS.findIndex((x) => x.id === (s === 'fino' ? 'recorrido' : s)));
   const LANGS: [string, string][] = [
     ['es', 'Español'],
     ['en', 'Inglés'],
@@ -178,9 +180,22 @@
 
   function go(to: number) {
     if (to > step && problems.length) return;
+    // En el recorrido, «Siguiente» y «Atrás» pasan por cada elemento de cada tipo antes de salir.
+    if (stepId === 'recorrido' && Math.abs(to - step) === 1 && tourMove(to - step)) return;
+    const from = step;
     step = Math.max(0, Math.min(STEPS.length - 1, to));
     reached = Math.max(reached, step);
     error = '';
+    if (STEPS[step].id === 'recorrido' && from !== step) {
+      // Entrando desde delante se empieza por el principio; volviendo desde detrás, por el final.
+      if (from < step) {
+        current = 0;
+        tourEl = 0;
+      } else {
+        current = answers.types.length - 1;
+        tourEl = Number.MAX_SAFE_INTEGER;
+      }
+    }
   }
 
   // ------------------------------------------------------------ edición
@@ -316,6 +331,10 @@
     setResources(next);
     for (const at of answers.attributes) if (at.icon === path) at.icon = undefined;
     if (answers.costIcon === path) answers.costIcon = undefined;
+    for (const f of [answers.fine, ...answers.types.map((t) => t.fine)]) {
+      if (f?.images?.background === path) delete f.images.background;
+      if (f?.images?.frame === path) delete f.images.frame;
+    }
   }
 
   const shelfItems = (shelf: ShelfId) => [...resourceUrls].filter(([p]) => shelfOf(p) === shelf).map(([path, url]) => ({ path, url }));
@@ -358,45 +377,36 @@
       (matched.size ? `; puestos por su nombre: ${[...matched.keys()].join(', ')}.` : '. Arrástralos a cada atributo o haz clic en su icono.');
   }
 
-  // ------------------------------------------------------------ ajuste fino
-
-  const PIECE_LABELS: Record<string, string> = {
-    fondo: 'Fondo de la carta',
-    cabecera: 'Banda del título',
-    'caja de texto': 'Caja de texto',
-    'banda tipo': 'Banda de la línea de tipo',
-    'fondo atributos': 'Fondo de los atributos',
-    panel: 'Panel de texto',
-    placa: 'Placa del nombre',
-    marco: 'Marco de la carta',
-    'marco ilustracion': 'Marco de la ilustración',
-  };
-  const TEXT_LABELS: Record<string, string> = {
-    titulo: 'Título',
-    'linea de tipo': 'Línea de tipo',
-    reglas: 'Reglas',
-    ambientacion: 'Ambientación',
-    numero: 'Número de colección',
-  };
-  const COLORS: [PieceColor, string][] = [
-    ['principal', 'Principal'],
-    ['acento', 'Acento'],
-    ['papel', 'Papel'],
-    ['tinta', 'Tinta'],
-    ['none', 'Transparente'],
-  ];
-  let showPieces = $state(true);
+  // ------------------------------------------------------------ recorrido tipo a tipo
 
   const tplZones = $derived(preview?.project.templates[typeKey({ label: previewLabel(currentType?.label) })]?.zones ?? []);
-  const pieces = $derived(tplZones.filter((z) => z.type === 'shape' && PIECE_LABELS[z.id]));
-  const texts = $derived(tplZones.filter((z) => z.type === 'text' && TEXT_LABELS[z.id]));
+  const tour = $derived(tourElements(tplZones));
+  /** Elemento del recorrido; puede pasarse del final (volviendo hacia atrás) y se ajusta al dibujar. */
+  let tourEl = $state(0);
+  const tourAt = $derived(Math.min(tourEl, Math.max(0, tour.length - 1)));
 
-  function piece(id: string) {
-    return (answers.fine.pieces[id] ??= {});
+  /** Avanza (o retrocede) un elemento; devuelve false si ya no quedan y hay que cambiar de paso. */
+  function tourMove(dir: number): boolean {
+    // Mientras se dibuja la plantilla no se sabe qué elementos tiene: se espera.
+    if (!tour.length) return true;
+    const at = tourAt + dir;
+    if (at >= 0 && at < tour.length) {
+      tourEl = at;
+      return true;
+    }
+    const type = current + dir;
+    if (type < 0 || type >= answers.types.length) return false;
+    current = type;
+    tourEl = dir > 0 ? 0 : Number.MAX_SAFE_INTEGER;
+    return true;
   }
-  function text(id: string) {
-    return (answers.fine.texts[id] ??= {});
-  }
+
+  const lib: Library = {
+    items: (shelf) => shelfItems(shelf),
+    add: (files, shelf) => addResources(files, shelf),
+    remove: (path) => removeResource(path),
+    url: (path) => (path ? resourceUrls.get(path) : undefined),
+  };
 
   // ------------------------------------------------------------ tabla
 
@@ -961,124 +971,36 @@
         </div>
       {/if}
       <label class="check"><input type="checkbox" bind:checked={answers.adjust.rounded} /> Esquinas redondeadas en cajas y bandas</label>
-    {:else if stepId === 'fino'}
-      <h2>Ajuste fino</h2>
+    {:else if stepId === 'recorrido'}
+      <h2>Tipo a tipo</h2>
       <p class="lead">
-        Opcional: retoca cada pieza del diseño. Los cambios valen para todos los tipos. Puedes saltarte este paso y volver cuando
-        quieras.
+        Repasamos cada tipo, elemento por elemento. Ajusta lo que quieras y pulsa «Siguiente»; lo que no toques se queda como en el
+        diseño. Puedes volver aquí cuando quieras.
       </p>
       {@render typeTabs()}
-      {#if uses('art') && (uses('rules') || uses('flavor'))}
-        <label class="field">
-          <span>Tamaño de la caja de texto: {Math.round((1 - answers.adjust.art) * 100)} %</span>
-          <input
-            type="range"
-            min="0.25"
-            max="0.7"
-            step="0.05"
-            value={1 - answers.adjust.art}
-            oninput={(e) => (answers.adjust.art = Math.round((1 - e.currentTarget.valueAsNumber) * 100) / 100)}
-          />
-          <small class="hint">El resto del espacio es para la ilustración.</small>
-        </label>
+      {#if tour.length}
+        <TypeTour
+          bind:answers
+          {current}
+          element={tourAt}
+          elements={tour}
+          zones={tplZones}
+          {lib}
+          {iconUrl}
+          {costUrl}
+          {setIcon}
+          ongo={(type, el) => {
+            current = type;
+            tourEl = el;
+          }}
+        />
+      {:else}
+        <p class="hint">Dibujando…</p>
       {/if}
-      <div class="field">
-        <span>Piezas</span>
-        <table class="fine">
-          <tbody>
-            {#each pieces as z (z.id)}
-              {@const cur = answers.fine.pieces[z.id] ?? {}}
-              {@const fill = cur.fill ?? ((z.type === 'shape' && z.fill) || 'none')}
-              {@const opacity = cur.opacity ?? (z.type === 'shape' ? (z.opacity ?? 1) : 1)}
-              {@const border = cur.border ?? (z.type === 'shape' && !!z.stroke)}
-              <tr>
-                <th>{PIECE_LABELS[z.id]}</th>
-                <td>
-                  <div class="swatches">
-                    {#each COLORS as [c, name]}
-                      <button
-                        class="sw"
-                        class:active={fill === c}
-                        class:none={c === 'none'}
-                        title={name}
-                        aria-label="{PIECE_LABELS[z.id]}: {name}"
-                        style:background={c === 'none' ? undefined : answers.adjust.palette[c]}
-                        onclick={() => (piece(z.id).fill = c)}
-                      ></button>
-                    {/each}
-                  </div>
-                </td>
-                <td>
-                  <label class="inline" title="Opacidad">
-                    <input type="range" min="0" max="1" step="0.05" value={opacity} oninput={(e) => (piece(z.id).opacity = e.currentTarget.valueAsNumber)} />
-                    {Math.round(opacity * 100)} %
-                  </label>
-                </td>
-                <td>
-                  <label class="inline"><input type="checkbox" checked={border} onchange={(e) => (piece(z.id).border = e.currentTarget.checked)} /> Borde</label>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-      <div class="field">
-        <span>Textos</span>
-        <table class="fine">
-          <tbody>
-            {#each texts as z (z.id)}
-              {@const cur = answers.fine.texts[z.id] ?? {}}
-              <tr>
-                <th>{TEXT_LABELS[z.id]}</th>
-                <td>
-                  <div class="swatches">
-                    {#each COLORS.filter(([c]) => c !== 'none') as [c, name]}
-                      <button
-                        class="sw"
-                        class:active={cur.color === c}
-                        title={name}
-                        aria-label="{TEXT_LABELS[z.id]}: {name}"
-                        style:background={answers.adjust.palette[c as keyof typeof answers.adjust.palette]}
-                        onclick={() => (text(z.id).color = c as never)}
-                      ></button>
-                    {/each}
-                  </div>
-                </td>
-                <td>
-                  <select
-                    value={cur.align ?? (z.type === 'text' ? (z.align ?? 'left') : 'left')}
-                    onchange={(e) => (text(z.id).align = e.currentTarget.value as never)}
-                    aria-label="Alineación de {TEXT_LABELS[z.id]}"
-                  >
-                    <option value="left">Izquierda</option>
-                    <option value="center">Centro</option>
-                    <option value="right">Derecha</option>
-                    <option value="justify">Justificado</option>
-                  </select>
-                </td>
-                <td>
-                  <label class="inline" title="Tamaño de letra">
-                    <input
-                      type="range"
-                      min="0.7"
-                      max="1.5"
-                      step="0.05"
-                      value={cur.scale ?? 1}
-                      oninput={(e) => (text(z.id).scale = e.currentTarget.valueAsNumber)}
-                    />
-                    {Math.round((cur.scale ?? 1) * 100)} %
-                  </label>
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-        <p class="hint">Si pones una caja transparente sobre la ilustración, cambia el color de su texto para que se lea.</p>
-      </div>
-      <div class="row">
-        <label class="check"><input type="checkbox" bind:checked={showPieces} /> Señalar las piezas en la carta</label>
-        <button class="small" onclick={() => (answers.fine = { pieces: {}, texts: {} })}>Restablecer el ajuste fino</button>
-      </div>
+      <p class="hint">
+        <button class="ghost small" onclick={() => go(stepIndex('traseras'))}>Saltar el resto del recorrido</button>
+        <button class="ghost small" onclick={() => { if (confirm('¿Quitar todos los ajustes del recorrido (de todos los tipos)?')) { answers.fine = { pieces: {}, texts: {} }; for (const t of answers.types) t.fine = undefined; } }}>Quitar todos los ajustes</button>
+      </p>
     {:else if STEPS[step].id === 'traseras'}
       <h2>Traseras</h2>
       <p class="lead">¿Cómo es el dorso de las cartas?</p>
@@ -1274,7 +1196,7 @@
       </div>
     {:else}
       {#if STEPS[step].id !== 'proyecto' && STEPS[step].id !== 'tipos'}{@render typeTabs()}{/if}
-      {@render card(preview, currentType?.label ?? '', stepId === 'fino' && showPieces ? { ...opts, zones: true } : opts)}
+      {@render card(preview, currentType?.label ?? '', stepId === 'recorrido' && tour[tourAt] ? { ...opts, focus: tour[tourAt].zones } : opts)}
       <small>{previewLabel(currentType?.label)} · vista previa</small>
     {/if}
   </aside>
@@ -1790,24 +1712,6 @@
   }
   table.fine td {
     padding: 6px 10px 6px 0;
-  }
-  .swatches {
-    display: flex;
-    gap: 4px;
-  }
-  .sw {
-    width: 22px;
-    height: 22px;
-    padding: 0;
-    border-radius: 5px;
-    border: 2px solid var(--border);
-  }
-  .sw.none {
-    background: repeating-conic-gradient(#555 0 25%, #333 0 50%) 0 0 / 8px 8px;
-  }
-  .sw.active {
-    border-color: #fff;
-    outline: 2px solid var(--accent);
   }
   .rules {
     margin: 0;

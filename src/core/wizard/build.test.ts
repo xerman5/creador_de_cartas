@@ -154,3 +154,56 @@ describe('iconos y habilidades', () => {
     expect(zones.find((z) => z.id === 'habilidades')).toMatchObject({ keys: ['volar'] });
   });
 });
+
+describe('ajustes por tipo, fondos y marcos', () => {
+  it('el ajuste de un tipo se suma al de todos y solo le afecta a él', async () => {
+    const a = rich({ langs: ['es'] });
+    a.fine = { pieces: { cabecera: { fill: 'acento' } }, texts: { titulo: { color: 'papel' } } };
+    a.types[1].fine = { texts: { titulo: { align: 'left', bold: false, font: 'body' } }, layout: { costCorner: 'left' } };
+    const { lp } = await load(a);
+    const z = (t: string, id: string) => lp.project.templates[t].zones.find((x) => x.id === id) as never as Record<string, never>;
+    expect(z('criatura', 'titulo')).toMatchObject({ align: 'center', font: { color: 'papel', weight: 'bold' } });
+    expect(z('hechizo', 'titulo')).toMatchObject({ align: 'left', font: { color: 'papel', weight: 'normal', family: 'Georgia, serif' } });
+    expect(z('hechizo', 'cabecera')).toMatchObject({ fill: 'acento' });
+    // El coste de «Hechizo» pasa a la izquierda; el de «Criatura» sigue a la derecha.
+    const x = (t: string) => (lp.project.templates[t].zones.find((q) => q.id === 'coste')!.rect.x);
+    expect(x('hechizo')).toBeLessThan(10);
+    expect(x('criatura')).toBeGreaterThan(40);
+  });
+
+  it('iconos: tamaño, número, nombre y fondo', async () => {
+    const a = rich({ langs: ['es'] });
+    a.attributes.push({ label: 'Volar', color: '#3d8fe0', kind: 'icon' });
+    a.types[0].attributes = ['ataque', 'vida', 'volar'];
+    a.fine.icons = { atributos: { scale: 0.5, value: 'below' }, habilidades: { labels: true, backdrop: 'none', align: 'start' }, coste: { scale: 0.8 } };
+    const base = await load(rich({ langs: ['es'] }));
+    const { lp } = await load(a);
+    const zones = Object.fromEntries(lp.project.templates.criatura.zones.map((z) => [z.id, z]));
+    const before = Object.fromEntries(base.lp.project.templates.criatura.zones.map((z) => [z.id, z]));
+    expect(zones.atributos).toMatchObject({ valuePosition: 'below', iconSize: Math.round((before.atributos as { iconSize: number }).iconSize * 50) / 100 });
+    expect(zones.habilidades).toMatchObject({ labels: true, align: 'start' });
+    expect((zones.habilidades as { backdrop?: string }).backdrop).toBeUndefined();
+    const c0 = before.coste.rect;
+    const c1 = zones.coste.rect;
+    expect(c1.w).toBeCloseTo(c0.w * 0.8, 1);
+    expect(c1.x + c1.w / 2).toBeCloseTo(c0.x + c0.w / 2, 1);
+  });
+
+  it('fondo debajo de todo y marco debajo de los textos', async () => {
+    const a = rich({ langs: ['es'] });
+    a.fine.images = { background: 'fondos/pergamino.jpg', frame: 'fondos/marco.png' };
+    a.types[1].fine = { images: { frame: '' } };
+    const { lp } = await load(a);
+    const ids = lp.project.templates.criatura.zones.map((z) => z.id);
+    expect(ids.slice(0, 2)).toEqual(['fondo', 'fondo imagen']);
+    const frame = ids.indexOf('marco imagen');
+    const types = lp.project.templates.criatura.zones.map((z) => z.type);
+    expect(types.slice(0, frame).every((t) => t === 'image' || t === 'shape')).toBe(true);
+    expect(types.slice(frame + 1).every((t) => t !== 'image' && t !== 'shape')).toBe(true);
+    expect(lp.project.templates.criatura.zones[frame]).toMatchObject({ default: 'fondos/marco.png', fit: 'stretch', bleed: true });
+    // «Hechizo» quita el marco solo para él.
+    expect(lp.project.templates.hechizo.zones.map((z) => z.id)).not.toContain('marco imagen');
+    expect(lp.project.templates.hechizo.zones.map((z) => z.id)).toContain('fondo imagen');
+    expect(projectIssues(lp)).toEqual([]);
+  });
+});

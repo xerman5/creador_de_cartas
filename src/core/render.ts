@@ -29,6 +29,8 @@ export interface RenderOptions {
   guides?: boolean;
   /** Dibujar el contorno de cada zona (para diseñar la anatomía). */
   zones?: boolean;
+  /** Resaltar estas zonas (por id): el resto de la carta se oscurece. */
+  focus?: string[];
 }
 
 export interface RenderResult {
@@ -94,6 +96,7 @@ export async function renderCard(row: CardRow, lp: LoadedProject, opts: RenderOp
     }
   }
 
+  if (opts.focus?.length) drawFocus(rc, tpl.zones.filter((z) => opts.focus!.includes(z.id) && !z.hidden));
   if (opts.zones) drawZoneOutlines(rc, tpl.zones);
   if (opts.guides) drawGuides(rc);
   return { canvas, warnings };
@@ -616,6 +619,33 @@ function drawZoneOutlines(rc: Ctx, zones: Zone[]) {
     ctx.fillStyle = '#000';
     ctx.fillText(label, r.x + k * 0.5, r.y + k * 0.3);
   }
+  ctx.restore();
+}
+
+/** Oscurece la carta salvo las zonas dadas y las recuadra. */
+function drawFocus(rc: Ctx, zones: Zone[]) {
+  if (!zones.length) return;
+  const { ctx, k, px } = rc;
+  const rects = zones.map((z) => zonePx(rc, z));
+  // Si una zona es la carta entera (el fondo), no hay nada que oscurecer.
+  if (rects.some((r) => r.w >= px.trimWidth && r.h >= px.trimHeight)) return;
+  // Capa aparte con agujeros: las zonas que se solapan no se anulan entre sí.
+  const layer = document.createElement('canvas');
+  layer.width = ctx.canvas.width;
+  layer.height = ctx.canvas.height;
+  const lc = layer.getContext('2d')!;
+  lc.setTransform(ctx.getTransform());
+  lc.fillStyle = 'rgba(10, 12, 18, 0.55)';
+  lc.fillRect(-px.bleed, -px.bleed, px.trimWidth + 2 * px.bleed, px.trimHeight + 2 * px.bleed);
+  for (const r of rects) lc.clearRect(r.x, r.y, r.w, r.h);
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(layer, 0, 0);
+  ctx.restore();
+  ctx.save();
+  ctx.lineWidth = Math.max(2, k * 0.35);
+  ctx.strokeStyle = '#4c7dff';
+  for (const r of rects) ctx.strokeRect(r.x, r.y, r.w, r.h);
   ctx.restore();
 }
 

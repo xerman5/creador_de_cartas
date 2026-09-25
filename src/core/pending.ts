@@ -61,7 +61,7 @@ export function pendingItems(lp: LoadedProject): PendingItem[] {
     items.push({
       id: 'art',
       label: `${art.length} ${art.length === 1 ? 'ilustración provisional' : 'ilustraciones provisionales'}`,
-      hint: 'Copia tus imágenes en assets/ y escribe la ruta de cada una en la columna «ilustracion» (p. ej. ilustraciones/dragon.png).',
+      hint: 'Añádelas en Recursos › Ilustraciones y escribe la ruta de cada una en la columna «ilustracion» (p. ej. ilustraciones/dragon.png).',
       rows: art,
       count: art.length,
     });
@@ -93,7 +93,7 @@ export function pendingItems(lp: LoadedProject): PendingItem[] {
     items.push({
       id: 'icons',
       label: `${icons.length} ${icons.length === 1 ? 'icono provisional' : 'iconos provisionales'}: ${icons.map(([k]) => k).join(', ')}`,
-      hint: 'Cámbialos en Proyecto › Atributos.',
+      hint: 'Cámbialos en Proyecto › Atributos: suelta tu icono en su hueco o elígelo de Recursos › Iconos.',
       rows: [],
       count: icons.length,
     });

@@ -31,6 +31,8 @@ export interface TypeAnswer {
   sameAs?: string;
   /** Datos de sus cartas, en orden; puede tener menos filas que `count`. */
   cards?: CardData[];
+  /** Ajustes solo de este tipo: se aplican encima de los de todos (`WizardAnswers.fine`). */
+  fine?: Partial<FineTune>;
 }
 
 /** `number`: icono con un número que cambia en cada carta (Ataque 3). `icon`: solo icono, la carta lo tiene o no (Volar). */
@@ -110,12 +112,61 @@ export interface TextStyle {
   scale?: number;
   color?: Exclude<PieceColor, 'none'>;
   align?: 'left' | 'center' | 'right' | 'justify';
+  /** Tipo de letra: la de los títulos o la de los textos. */
+  font?: 'title' | 'body';
+  bold?: boolean;
+  italic?: boolean;
 }
 
-/** Ajuste fino por pieza del diseño (por id de zona): se aplica a todos los tipos. */
+/** Iconos de una zona de atributos, habilidades o coste. */
+export interface IconStyle {
+  /** Tamaño respecto al máximo que cabe (0,5–1). */
+  scale?: number;
+  /** Dónde va el número (atributos). */
+  value?: 'over' | 'after' | 'below';
+  /** Escribir el nombre junto al icono (habilidades). */
+  labels?: boolean;
+  /** Fondo de cada icono (habilidades); `none` = sin fondo. */
+  backdrop?: PieceColor;
+  align?: 'start' | 'center' | 'end';
+}
+
+/** Imágenes de la carta entera: van en `assets/fondos/`. */
+export interface CardImages {
+  /** Debajo de todo. */
+  background?: string;
+  /** Encima de la ilustración y las formas, debajo de los textos: un PNG con transparencia. */
+  frame?: string;
+}
+
+/**
+ * Ajuste fino por pieza del diseño (por id de zona). El de `WizardAnswers` vale para todos los tipos;
+ * el de cada tipo (`TypeAnswer.fine`) se aplica encima.
+ */
 export interface FineTune {
   pieces: Record<string, PieceStyle>;
   texts: Record<string, TextStyle>;
+  icons?: Record<string, IconStyle>;
+  images?: CardImages;
+  /** Distribución: tamaño de la ilustración, lado de los atributos, esquina del coste. */
+  layout?: Partial<Pick<Adjust, 'art' | 'attrSide' | 'costCorner'>>;
+}
+
+/** Une el ajuste de todos con el de un tipo (el del tipo manda, pieza a pieza). */
+export function mergeFine(base: FineTune, over: Partial<FineTune> | undefined): FineTune {
+  if (!over) return base;
+  const merge = <T extends object>(a: Record<string, T> | undefined, b: Record<string, T> | undefined) => {
+    const out: Record<string, T> = { ...a };
+    for (const [k, v] of Object.entries(b ?? {})) out[k] = { ...out[k], ...v };
+    return out;
+  };
+  return {
+    pieces: merge(base.pieces, over.pieces),
+    texts: merge(base.texts, over.texts),
+    icons: merge(base.icons, over.icons),
+    images: { ...base.images, ...over.images },
+    layout: { ...base.layout, ...over.layout },
+  };
 }
 
 export interface WizardAnswers {
@@ -175,7 +226,7 @@ export function withDefaults(raw: Partial<WizardAnswers> | null | undefined): Wi
     attributes: Array.isArray(raw.attributes) ? raw.attributes : d.attributes,
     variant: { ...d.variant, ...raw.variant },
     adjust: { ...d.adjust, ...raw.adjust, palette: { ...d.adjust.palette, ...raw.adjust?.palette } },
-    fine: { pieces: { ...raw.fine?.pieces }, texts: { ...raw.fine?.texts } },
+    fine: { ...raw.fine, pieces: { ...raw.fine?.pieces }, texts: { ...raw.fine?.texts } },
   };
 }
 
